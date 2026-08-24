@@ -1,0 +1,95 @@
+{
+  "meta": {
+    "organization": "สำนักงานสาธารณสุขจังหวัดศรีสะเกษ",
+    "warehouse": "คลังยาและเวชภัณฑ์กลาง",
+    "sourceWorkbook": "Stock logistics Sisaket.xlsx",
+    "sourceSheet": "คงคลังปัจจุบัน",
+    "importedAt": "2026-08-24T00:00:00.000Z",
+    "note": "วันหมดอายุแปลงจากปี พ.ศ. แบบสองหลักในไฟล์ต้นฉบับเป็น ISO ค.ศ."
+  },
+  "items": [
+    {"id":"itm-001","code":"GEN-KIT-001","name":"ชุดยาสามัญประจำบ้าน","category":"ชุดยา","qty":3000,"unit":"ชุด","package":"60 ลัง, ลังละ 50 ชุด","minQty":500,"expiry":"2027-08-28","lot":"MIG-001","location":"A-01","sourceRow":3,"active":true},
+    {"id":"itm-002","code":"MED-MASK-001","name":"หน้ากากคาร์บอน","category":"เวชภัณฑ์","qty":35,"unit":"กล่อง","package":"กล่องละ 40 ชิ้น","minQty":10,"expiry":"2028-08-05","lot":"MIG-002","location":"B-01","sourceRow":4,"active":true},
+    {"id":"itm-003","code":"MOS-LOT-001","name":"โลชั่นทากันยุง ก.ย.15 (8 g)","category":"ผลิตภัณฑ์สุขภาพ","qty":5,"unit":"ลัง","package":"ลังละ 1,000 ซอง","minQty":3,"expiry":"2028-08-02","lot":"MIG-003","location":"B-02","sourceRow":5,"active":true},
+    {"id":"itm-004","code":"EZB-500-001","name":"EZ bag II 500 ml (Enteral feeding bag)","category":"อุปกรณ์การแพทย์","qty":3,"unit":"ลัง","package":"ลังละ 500 ชิ้น","minQty":2,"expiry":"2029-11-16","lot":"MIG-004","location":"C-01","sourceRow":6,"active":true},
+    {"id":"itm-005","code":"INH-TAK-001","name":"ยาดม ตราตะขาบ","category":"ยา","qty":199,"unit":"โหล","package":"9 ลัง x 20 โหล และ 1 ลัง x 19 โหล","minQty":30,"expiry":"2028-09-19","lot":"MIG-005","location":"A-02","sourceRow":7,"active":true},
+    {"id":"itm-006","code":"PCM-MYM-500","name":"Paracetamol 500 mg (50'S) (Mymol)","category":"ยา","qty":5,"unit":"ลัง","package":"ลังละ 240 กระปุก, แพ็กละ 6 กระปุก","minQty":2,"expiry":"2027-07-27","lot":"MIG-006","location":"A-03","sourceRow":8,"active":true},
+    {"id":"itm-007","code":"PCM-CEM-500","name":"Paracetamol 500 mg (50x10'S) (Cemol)","category":"ยา","qty":15,"unit":"กล่อง","package":"กล่อง","minQty":5,"expiry":"2030-10-25","lot":"MIG-007","location":"A-03","sourceRow":9,"active":true},
+    {"id":"itm-008","code":"PCM-YWR-500","name":"Paracetamol 500 mg (40'S) (เยาวราช)","category":"ยา","qty":19,"unit":"แพ็ก","package":"แพ็กละ 10 กระปุก","minQty":5,"expiry":"2030-01-21","lot":"MIG-008","location":"A-03","sourceRow":10,"active":true},
+    {"id":"itm-009","code":"PCM-GPO-500","name":"Paracetamol 500 mg (50x10'S) (GPO)","category":"ยา","qty":3,"unit":"กล่อง","package":"กล่องละ 50 ชิ้น","minQty":3,"expiry":"2029-07-22","lot":"MIG-009","location":"A-03","sourceRow":11,"active":true},
+    {"id":"itm-010","code":"PCM-CEM-010","name":"Paracetamol 500 mg (10'S) (Cemol)","category":"ยา","qty":10,"unit":"แผง","package":"แผง","minQty":5,"expiry":"2030-07-18","lot":"MIG-010","location":"A-03","sourceRow":12,"active":true},
+    {"id":"itm-011","code":"PCM-SAR-120","name":"Paracetamol 120 mg/5 ml (60 ml) (Sara)","category":"ยา","qty":10,"unit":"ขวด","package":"ขวด","minQty":5,"expiry":"2028-10-03","lot":"MIG-011","location":"A-04","sourceRow":13,"active":true},
+    {"id":"itm-012","code":"ALC-SVN-450","name":"Alcohol 70% (450 ml) (Sevenstar)","category":"เวชภัณฑ์","qty":5,"unit":"ลัง","package":"ลังละ 24 ขวด","minQty":2,"expiry":"2028-11-26","lot":"MIG-012","location":"B-03","sourceRow":14,"active":true},
+    {"id":"itm-013","code":"ALC-YWR-450","name":"Alcohol 70% (450 ml) (เยาวราช)","category":"เวชภัณฑ์","qty":10,"unit":"ลัง","package":"ลังละ 36 ขวด, แพ็กละ 6 ขวด","minQty":3,"expiry":"2026-11-27","lot":"MIG-013","location":"B-03","sourceRow":15,"active":true},
+    {"id":"itm-014","code":"ALC-ALS-060","name":"Alcohol 70% (60 ml) (Alsoft)","category":"เวชภัณฑ์","qty":10,"unit":"ขวด","package":"ขวด","minQty":5,"expiry":"2030-02-19","lot":"MIG-014","location":"B-03","sourceRow":16,"active":true},
+    {"id":"itm-015","code":"PVI-PIO-030","name":"Povidone-iodine 10% w/v (30 ml) (Piodine)","category":"ยา","qty":24,"unit":"กล่อง","package":"กล่องละ 12 ขวด","minQty":8,"expiry":"2026-09-13","lot":"MIG-015","location":"A-05","sourceRow":17,"active":true},
+    {"id":"itm-016","code":"HER-SYR-060","name":"Heromycin-D syrup (60 ml)","category":"ยา","qty":2,"unit":"ลัง","package":"ลังละ 12 โหล, แพ็กละ 1 โหล","minQty":2,"expiry":"2027-02-07","lot":"MIG-016","location":"A-05","sourceRow":18,"active":true},
+    {"id":"itm-017","code":"PPE-SET-001","name":"ชุด PPE","category":"อุปกรณ์ป้องกัน","qty":20,"unit":"ลัง","package":"ลังละ 100 ชุด","minQty":5,"expiry":null,"lot":"MIG-017","location":"C-02","sourceRow":19,"active":true},
+    {"id":"itm-018","code":"CPM-HIS-004","name":"Chlorpheniramine 4 mg (100'S) (Histatab)","category":"ยา","qty":10,"unit":"กระปุก","package":"กระปุก","minQty":5,"expiry":"2030-08-21","lot":"MIG-018","location":"A-06","sourceRow":20,"active":true},
+    {"id":"itm-019","code":"TEN-PLA-001","name":"Tensoplast","category":"เวชภัณฑ์","qty":2,"unit":"กล่อง","package":"กล่อง","minQty":2,"expiry":"2028-03-18","lot":"MIG-019","location":"B-04","sourceRow":21,"active":true},
+    {"id":"itm-020","code":"ACT-CAR-010","name":"Activated Charcoal (10x10'S) (CA-R-BON)","category":"ยา","qty":3,"unit":"กล่อง","package":"กล่อง","minQty":2,"expiry":"2030-07-02","lot":"MIG-020","location":"A-06","sourceRow":22,"active":true},
+    {"id":"itm-021","code":"OINT-29A-075","name":"ขี้ผึ้ง 29A (7.5 g)","category":"ยา","qty":6,"unit":"กระปุก","package":"กระปุก","minQty":3,"expiry":"2030-06-21","lot":"MIG-021","location":"A-06","sourceRow":23,"active":true},
+    {"id":"itm-022","code":"ALG-LEO-450","name":"Alcohol gel 450 ml เสือดาว","category":"เวชภัณฑ์","qty":46,"unit":"ขวด","package":"ขวด","minQty":12,"expiry":"2028-07-14","lot":"MIG-022","location":"B-04","sourceRow":24,"active":true},
+    {"id":"itm-023","code":"MSK-XMK-001","name":"หน้ากากอนามัย Xmask","category":"เวชภัณฑ์","qty":44,"unit":"กล่อง","package":"กล่อง","minQty":12,"expiry":"2030-09-02","lot":"MIG-023","location":"B-01","sourceRow":25,"active":true}
+  ],
+  "transactions": [
+    {"id":"txn-001","type":"inbound","refNo":"MIG-25185-GPO","facility":"องค์การเภสัชกรรม","date":"2025-12-09","status":"posted","items":[{"itemId":"itm-001","qty":10000,"lot":"GPO-25185","expiry":"2027-08-28"}],"note":"นำเข้าจากชีตชุดยาสามัญ","createdBy":"migration","createdAt":"2026-08-24T00:00:00.000Z"},
+    {"id":"txn-002","type":"outbound","refNo":"MIG-25187-SSO","facility":"สสอ. 20 อำเภอ","date":"2025-12-11","status":"posted","items":[{"itemId":"itm-001","qty":6250,"lot":"GPO-25185","expiry":"2027-08-28"}],"note":"กระจายชุดยาสามัญตามรายการในไฟล์ต้นฉบับ","createdBy":"migration","createdAt":"2026-08-24T00:00:00.000Z"},
+    {"id":"txn-003","type":"inbound","refNo":"MIG-ALC-YWR","facility":"เยาวราช","date":"2026-07-12","status":"posted","items":[{"itemId":"itm-013","qty":10,"lot":"MIG-013","expiry":"2026-11-27"}],"note":"ยอดยกมาจากคงคลังปัจจุบัน","createdBy":"migration","createdAt":"2026-08-24T00:00:00.000Z"},
+    {"id":"txn-004","type":"inbound","refNo":"MIG-PVI-PIO","facility":"คลังกลาง","date":"2026-07-15","status":"posted","items":[{"itemId":"itm-015","qty":24,"lot":"MIG-015","expiry":"2026-09-13"}],"note":"ยอดยกมาจากคงคลังปัจจุบัน","createdBy":"migration","createdAt":"2026-08-24T00:00:00.000Z"},
+    {"id":"txn-005","type":"outbound","refNo":"MIG-XMASK-001","facility":"กองงานแพทย์แผนไทย / รพ.พยุห์ / NCD ทหาร","date":"2026-08-02","status":"posted","items":[{"itemId":"itm-023","qty":36,"lot":"MIG-023","expiry":"2030-09-02"}],"note":"อ้างอิงการเบิกหน้ากากจากชีตชมรมร้านยา","createdBy":"migration","createdAt":"2026-08-24T00:00:00.000Z"}
+  ],
+  "facilities": ["คลังกลาง สสจ.ศรีสะเกษ","สสอ.เมืองศรีสะเกษ","รพ.ศรีสะเกษ","รพ.กันทรลักษ์","รพ.พยุห์","สสอ.ขุขันธ์","กองงานแพทย์แผนไทย","NCD ทหาร"],
+  "integrations": [
+    {"id":"int-rest","name":"Hospital REST API","kind":"REST / JSON","status":"ready","detail":"API versioned สำหรับ HIS, ERP และระบบจัดซื้อ"},
+    {"id":"int-csv","name":"CSV / Excel Bridge","kind":"File exchange","status":"ready","detail":"ส่งออก UTF-8 CSV และรองรับ staging ก่อนนำเข้าข้อมูล"},
+    {"id":"int-hosxp","name":"HOSxP Connector","kind":"Adapter profile","status":"design","detail":"รอ mapping รหัสยา หน่วย และหน่วยบริการของโรงพยาบาล"},
+    {"id":"int-fhir","name":"HL7 FHIR Gateway","kind":"Interoperability","status":"design","detail":"เตรียม profile สำหรับ Medication และ supply workflow ผ่าน gateway"}
+  ],
+  "hospitalNetwork": [
+    {"id":"hsp-001","name":"โรงพยาบาลศรีสะเกษ","district":"เมืองศรีสะเกษ","level":"รพศ.","system":"HIS API","syncStatus":"online","lastSyncMinutes":1,"readiness":98,"itemLines":2840,"lowStock":4,"expiring":7,"unmapped":2,"stockScore":96},
+    {"id":"hsp-002","name":"โรงพยาบาลกันทรลักษ์","district":"กันทรลักษ์","level":"รพช. M2","system":"HOSxP","syncStatus":"online","lastSyncMinutes":2,"readiness":96,"itemLines":1960,"lowStock":8,"expiring":5,"unmapped":3,"stockScore":91},
+    {"id":"hsp-003","name":"โรงพยาบาลกันทรารมย์","district":"กันทรารมย์","level":"รพช. F1","system":"HOSxP","syncStatus":"online","lastSyncMinutes":3,"readiness":94,"itemLines":1420,"lowStock":6,"expiring":4,"unmapped":4,"stockScore":90},
+    {"id":"hsp-004","name":"โรงพยาบาลขุขันธ์","district":"ขุขันธ์","level":"รพช. M2","system":"HOSxP","syncStatus":"online","lastSyncMinutes":2,"readiness":97,"itemLines":1880,"lowStock":5,"expiring":6,"unmapped":2,"stockScore":93},
+    {"id":"hsp-005","name":"โรงพยาบาลราษีไศล","district":"ราษีไศล","level":"รพช. F1","system":"HOSxP","syncStatus":"delayed","lastSyncMinutes":38,"readiness":82,"itemLines":1310,"lowStock":11,"expiring":8,"unmapped":9,"stockScore":78},
+    {"id":"hsp-006","name":"โรงพยาบาลอุทุมพรพิสัย","district":"อุทุมพรพิสัย","level":"รพช. M2","system":"HIS API","syncStatus":"online","lastSyncMinutes":4,"readiness":95,"itemLines":1750,"lowStock":4,"expiring":3,"unmapped":3,"stockScore":92},
+    {"id":"hsp-007","name":"โรงพยาบาลปรางค์กู่","district":"ปรางค์กู่","level":"รพช. F2","system":"CSV Bridge","syncStatus":"online","lastSyncMinutes":8,"readiness":89,"itemLines":980,"lowStock":7,"expiring":4,"unmapped":6,"stockScore":85},
+    {"id":"hsp-008","name":"โรงพยาบาลไพรบึง","district":"ไพรบึง","level":"รพช. F2","system":"HOSxP","syncStatus":"online","lastSyncMinutes":5,"readiness":93,"itemLines":1050,"lowStock":3,"expiring":5,"unmapped":4,"stockScore":90},
+    {"id":"hsp-009","name":"โรงพยาบาลห้วยทับทัน","district":"ห้วยทับทัน","level":"รพช. F2","system":"HOSxP","syncStatus":"online","lastSyncMinutes":3,"readiness":92,"itemLines":940,"lowStock":5,"expiring":2,"unmapped":4,"stockScore":88},
+    {"id":"hsp-010","name":"โรงพยาบาลโนนคูณ","district":"โนนคูณ","level":"รพช. F2","system":"CSV Bridge","syncStatus":"delayed","lastSyncMinutes":51,"readiness":79,"itemLines":870,"lowStock":12,"expiring":6,"unmapped":11,"stockScore":73},
+    {"id":"hsp-011","name":"โรงพยาบาลยางชุมน้อย","district":"ยางชุมน้อย","level":"รพช. F2","system":"HOSxP","syncStatus":"online","lastSyncMinutes":6,"readiness":91,"itemLines":820,"lowStock":4,"expiring":3,"unmapped":5,"stockScore":87},
+    {"id":"hsp-012","name":"โรงพยาบาลศรีรัตนะ","district":"ศรีรัตนะ","level":"รพช. F2","system":"HOSxP","syncStatus":"online","lastSyncMinutes":4,"readiness":94,"itemLines":910,"lowStock":2,"expiring":4,"unmapped":3,"stockScore":91},
+    {"id":"hsp-013","name":"โรงพยาบาลวังหิน","district":"วังหิน","level":"รพช. F2","system":"HOSxP","syncStatus":"online","lastSyncMinutes":7,"readiness":90,"itemLines":890,"lowStock":6,"expiring":5,"unmapped":5,"stockScore":85},
+    {"id":"hsp-014","name":"โรงพยาบาลบึงบูรพ์","district":"บึงบูรพ์","level":"รพช. F3","system":"CSV Bridge","syncStatus":"offline","lastSyncMinutes":186,"readiness":61,"itemLines":620,"lowStock":14,"expiring":7,"unmapped":18,"stockScore":64},
+    {"id":"hsp-015","name":"โรงพยาบาลน้ำเกลี้ยง","district":"น้ำเกลี้ยง","level":"รพช. F2","system":"HOSxP","syncStatus":"online","lastSyncMinutes":5,"readiness":92,"itemLines":860,"lowStock":3,"expiring":4,"unmapped":4,"stockScore":89},
+    {"id":"hsp-016","name":"โรงพยาบาลเบญจลักษ์เฉลิมพระเกียรติฯ","district":"เบญจลักษ์","level":"รพช. F1","system":"HIS API","syncStatus":"online","lastSyncMinutes":2,"readiness":97,"itemLines":1180,"lowStock":4,"expiring":3,"unmapped":2,"stockScore":94},
+    {"id":"hsp-017","name":"โรงพยาบาลเมืองจันทร์","district":"เมืองจันทร์","level":"รพช. F3","system":"HOSxP","syncStatus":"online","lastSyncMinutes":6,"readiness":90,"itemLines":690,"lowStock":5,"expiring":2,"unmapped":5,"stockScore":86},
+    {"id":"hsp-018","name":"โรงพยาบาลพยุห์","district":"พยุห์","level":"รพช. F2","system":"HOSxP","syncStatus":"online","lastSyncMinutes":3,"readiness":95,"itemLines":930,"lowStock":3,"expiring":3,"unmapped":2,"stockScore":92},
+    {"id":"hsp-019","name":"โรงพยาบาลโพธิ์ศรีสุวรรณ","district":"โพธิ์ศรีสุวรรณ","level":"รพช. F2","system":"CSV Bridge","syncStatus":"delayed","lastSyncMinutes":44,"readiness":81,"itemLines":750,"lowStock":9,"expiring":5,"unmapped":8,"stockScore":77},
+    {"id":"hsp-020","name":"โรงพยาบาลศิลาลาด","district":"ศิลาลาด","level":"รพช. F3","system":"HOSxP","syncStatus":"online","lastSyncMinutes":8,"readiness":88,"itemLines":640,"lowStock":5,"expiring":3,"unmapped":6,"stockScore":84},
+    {"id":"hsp-021","name":"โรงพยาบาลขุนหาญ","district":"ขุนหาญ","level":"รพช. M2","system":"HIS API","syncStatus":"online","lastSyncMinutes":2,"readiness":96,"itemLines":1690,"lowStock":4,"expiring":5,"unmapped":3,"stockScore":93},
+    {"id":"hsp-022","name":"โรงพยาบาลภูสิงห์","district":"ภูสิงห์","level":"รพช. F1","system":"HOSxP","syncStatus":"online","lastSyncMinutes":5,"readiness":93,"itemLines":1120,"lowStock":5,"expiring":4,"unmapped":4,"stockScore":89}
+  ],
+  "mappingQueue": [
+    {"id":"map-001","hospitalId":"hsp-001","sourceSystem":"HIS API","sourceCode":"MED-PARA-GPO","sourceName":"PARA 500 TAB GPO 50x10","unit":"กล่อง","suggestedItemId":"itm-009","confidence":0.98,"status":"pending","reasons":["คำสำคัญตรงกัน: paracetamol, gpo, 500","รูปแบบบรรจุ 50x10 ตรงกัน","หน่วยตรงกัน: กล่อง"],"createdAt":"2026-08-24T02:15:00.000Z"},
+    {"id":"map-002","hospitalId":"hsp-002","sourceSystem":"HOSxP","sourceCode":"PCM-MYM-50","sourceName":"PARA 500 MYMOL 50'S","unit":"ลัง","suggestedItemId":"itm-006","confidence":0.97,"status":"pending","reasons":["คำสำคัญตรงกัน: paracetamol, mymol, 50","แบรนด์ Mymol ตรงกัน","หน่วยตรงกัน: ลัง"],"createdAt":"2026-08-24T02:18:00.000Z"},
+    {"id":"map-003","hospitalId":"hsp-004","sourceSystem":"HOSxP","sourceCode":"ALC70-YW-450","sourceName":"ALCOHOL 70% 450ML เยาวราช","unit":"ลัง","suggestedItemId":"itm-013","confidence":0.99,"status":"pending","reasons":["ชื่อ สารสำคัญ และความแรงตรงกัน","ขนาด 450 ml และผู้ผลิตตรงกัน","หน่วยตรงกัน: ลัง"],"createdAt":"2026-08-24T02:23:00.000Z"},
+    {"id":"map-004","hospitalId":"hsp-006","sourceSystem":"HIS API","sourceCode":"SUP-XMASK","sourceName":"MASK X-MASK 40 PCS","unit":"กล่อง","suggestedItemId":"itm-023","confidence":0.96,"status":"pending","reasons":["คำสำคัญตรงกัน: mask, xmask","รูปแบบบรรจุ 40 ชิ้น","หน่วยตรงกัน: กล่อง"],"createdAt":"2026-08-24T02:31:00.000Z"},
+    {"id":"map-005","hospitalId":"hsp-008","sourceSystem":"HOSxP","sourceCode":"PVI30","sourceName":"POVIDONE IODINE 10% 30ML","unit":"กล่อง","suggestedItemId":"itm-015","confidence":0.95,"status":"pending","reasons":["คำสำคัญตรงกัน: povidone, iodine","ความแรง 10% และขนาด 30 ml ตรงกัน","หน่วยตรงกัน: กล่อง"],"createdAt":"2026-08-24T02:36:00.000Z"},
+    {"id":"map-006","hospitalId":"hsp-010","sourceSystem":"CSV Bridge","sourceCode":"EZ-FEED-500","sourceName":"EZ BAG FEEDING 500","unit":"ลัง","suggestedItemId":"itm-004","confidence":0.93,"status":"pending","reasons":["คำสำคัญตรงกัน: ez, bag, feeding, 500","ชนิดอุปกรณ์ตรงกัน","หน่วยตรงกัน: ลัง"],"createdAt":"2026-08-24T02:42:00.000Z"},
+    {"id":"map-007","hospitalId":"hsp-012","sourceSystem":"HOSxP","sourceCode":"CPM4-HST","sourceName":"CPM HISTATAB 4MG 100'S","unit":"กระปุก","suggestedItemId":"itm-018","confidence":0.92,"status":"pending","reasons":["คำย่อ CPM ตรงกับ chlorpheniramine","แบรนด์ Histatab และความแรงตรงกัน","หน่วยตรงกัน: กระปุก"],"createdAt":"2026-08-24T02:48:00.000Z"},
+    {"id":"map-008","hospitalId":"hsp-014","sourceSystem":"CSV Bridge","sourceCode":"PARA-CEM10","sourceName":"PARA 500 10'S CEMOL","unit":"แผง","suggestedItemId":"itm-010","confidence":0.88,"status":"review","reasons":["คำสำคัญตรงกัน: paracetamol, cemol","รูปแบบ 10'S ตรงกัน","ควรยืนยันหน่วยแผงก่อนอนุมัติ"],"createdAt":"2026-08-24T02:52:00.000Z"},
+    {"id":"map-009","hospitalId":"hsp-016","sourceSystem":"HIS API","sourceCode":"ALG-LEO450","sourceName":"ALCOHOL GEL LEO 450","unit":"ขวด","suggestedItemId":"itm-022","confidence":0.94,"status":"pending","reasons":["คำสำคัญตรงกัน: alcohol, gel, leo, 450","แบรนด์เสือดาวตรงกัน","หน่วยตรงกัน: ขวด"],"createdAt":"2026-08-24T02:56:00.000Z"},
+    {"id":"map-010","hospitalId":"hsp-018","sourceSystem":"HOSxP","sourceCode":"PPE100","sourceName":"PPE SET 100 PCS","unit":"ลัง","suggestedItemId":"itm-017","confidence":0.91,"status":"pending","reasons":["คำสำคัญตรงกัน: ppe, set, 100","รูปแบบบรรจุตรงกัน","หน่วยตรงกัน: ลัง"],"createdAt":"2026-08-24T03:02:00.000Z"},
+    {"id":"map-011","hospitalId":"hsp-020","sourceSystem":"HOSxP","sourceCode":"CARBON1010","sourceName":"CARBON 10x10 TAB","unit":"กล่อง","suggestedItemId":"itm-020","confidence":0.89,"status":"review","reasons":["คำสำคัญตรงกัน: carbon, 10x10","รูปแบบบรรจุใกล้เคียง","ควรยืนยันชื่อการค้า"],"createdAt":"2026-08-24T03:08:00.000Z"},
+    {"id":"map-012","hospitalId":"hsp-022","sourceSystem":"HOSxP","sourceCode":"TENSO-BX","sourceName":"TENSOPLAST BOX","unit":"กล่อง","suggestedItemId":"itm-019","confidence":0.87,"status":"review","reasons":["ชื่อการค้าตรงกัน","หน่วยตรงกัน: กล่อง","ความเชื่อมั่นต่ำกว่าเกณฑ์ 90%"],"createdAt":"2026-08-24T03:14:00.000Z"}
+  ],
+  "rebalancing": [
+    {"id":"reb-001","itemId":"itm-015","fromHospitalId":"hsp-001","toHospitalId":"hsp-014","qty":6,"unit":"กล่อง","urgency":"critical","reason":"ปลายทางเหลือใช้ 4 วัน ขณะที่ต้นทางมีเกินจุดสำรอง 18 กล่อง"},
+    {"id":"reb-002","itemId":"itm-023","fromHospitalId":"hsp-004","toHospitalId":"hsp-010","qty":8,"unit":"กล่อง","urgency":"high","reason":"ลดความเสี่ยงหน้ากากขาดก่อนรอบจัดซื้อถัดไป"},
+    {"id":"reb-003","itemId":"itm-017","fromHospitalId":"hsp-021","toHospitalId":"hsp-019","qty":3,"unit":"ลัง","urgency":"medium","reason":"ปรับสมดุล PPE ตามอัตราใช้เฉลี่ย 30 วัน"}
+  ],
+  "audit": [
+    {"id":"aud-001","action":"IMPORT","entity":"workbook","entityId":"Stock logistics Sisaket.xlsx","user":"migration","at":"2026-08-24T00:00:00.000Z","detail":"นำเข้าข้อมูลตั้งต้นจากชีตคงคลังปัจจุบัน 23 รายการ"}
+  ]
+}

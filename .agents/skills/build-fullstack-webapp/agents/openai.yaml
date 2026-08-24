@@ -1,0 +1,4 @@
+interface:
+  display_name: "Build Full-Stack Web App"
+  short_description: "Coordinate complete web app delivery workflows"
+  default_prompt: "Use $build-fullstack-webapp to inspect this project and implement a complete vertical slice."

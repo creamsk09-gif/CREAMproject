@@ -1,0 +1,4 @@
+interface:
+  display_name: "Web App Security Reviewer"
+  short_description: "Review web app trust boundaries and security controls"
+  default_prompt: "Use $webapp-security-reviewer to perform a risk-based security review of this feature and verify fixes with tests."

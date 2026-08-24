@@ -1,0 +1,4 @@
+interface:
+  display_name: "Web App Product Planner"
+  short_description: "Plan users, flows, routes, and acceptance criteria"
+  default_prompt: "Use $webapp-product-planner to turn these requirements into an implementation-ready product plan."

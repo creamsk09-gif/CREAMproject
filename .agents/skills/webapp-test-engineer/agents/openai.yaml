@@ -1,0 +1,4 @@
+interface:
+  display_name: "Web App Test Engineer"
+  short_description: "Design risk-based unit, integration, and E2E tests"
+  default_prompt: "Use $webapp-test-engineer to add focused tests for this web app change."

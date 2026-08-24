@@ -1,0 +1,4 @@
+interface:
+  display_name: "Web App Data Modeler"
+  short_description: "Design schemas, migrations, indexes, and data safety"
+  default_prompt: "Use $webapp-data-modeler to design and validate the data model and migration for this feature."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Web App Architecture Designer"
+  short_description: "Design secure, maintainable web app architecture"
+  default_prompt: "Use $webapp-architecture-designer to inspect this project and propose the smallest secure architecture that fits its existing stack."

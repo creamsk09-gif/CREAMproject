@@ -1,0 +1,4 @@
+interface:
+  display_name: "Web App API Builder"
+  short_description: "Build validated and secure web API endpoints"
+  default_prompt: "Use $webapp-api-builder to implement this API with validation, authorization, and tests."

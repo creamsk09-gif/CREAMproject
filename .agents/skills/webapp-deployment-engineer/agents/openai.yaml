@@ -1,0 +1,4 @@
+interface:
+  display_name: "Web App Deployment Engineer"
+  short_description: "Build safe releases, migrations, observability, and rollback"
+  default_prompt: "Use $webapp-deployment-engineer to prepare a repeatable deployment with safe migrations, health checks, and rollback."

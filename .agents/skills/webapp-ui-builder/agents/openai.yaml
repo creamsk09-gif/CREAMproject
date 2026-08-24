@@ -1,0 +1,4 @@
+interface:
+  display_name: "Web App UI Builder"
+  short_description: "Build polished responsive and accessible interfaces"
+  default_prompt: "Use $webapp-ui-builder to implement this screen in the project existing design system."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Web App AI Feature Builder"
+  short_description: "Build safe AI features with human oversight and fallback"
+  default_prompt: "Use $webapp-ai-feature-builder to build this AI-assisted workflow with validated outputs, fallback, and human confirmation."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Web App Auth & RBAC"
+  short_description: "Implement secure identity, sessions, and permissions"
+  default_prompt: "Use $webapp-auth-rbac to implement authentication and resource-level authorization using the project conventions."

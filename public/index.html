@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#071b1d">
+  <title>Stock Logistics Sisaket</title>
+  <link rel="stylesheet" href="/styles.css?v=6">
+</head>
+<body>
+  <section id="login-view" class="login-page" aria-labelledby="login-title">
+    <div class="login-shell">
+      <div class="login-visual">
+        <div class="brand brand-large"><span class="brand-mark" aria-hidden="true">✚</span><span><strong>STOCK LOGISTICS</strong><small>SISAKET HEALTH WAREHOUSE</small></span></div>
+        <div class="warehouse-art" aria-hidden="true">
+          <div class="art-orbit orbit-one"></div><div class="art-orbit orbit-two"></div>
+          <div class="warehouse-roof"></div>
+          <div class="warehouse-body"><span class="shelf shelf-a"></span><span class="shelf shelf-b"></span><span class="box box-a"></span><span class="box box-b"></span><span class="bottle"></span></div>
+          <div class="medical-badge">+</div>
+          <div class="delivery-truck"><span class="truck-cross">+</span><i></i><b></b></div>
+        </div>
+        <div><h2>คลังพร้อมใช้ ข้อมูลพร้อมตัดสินใจ</h2><p>รับเข้า เบิกจ่าย และติดตามวันหมดอายุในจุดเดียว ออกแบบจากข้อมูลคลังจริงของจังหวัดศรีสะเกษ</p></div>
+        <div class="visual-chips"><span>ตรวจสอบย้อนหลังได้</span><span>รองรับการเชื่อมต่อ</span><span>แจ้งเตือนล่วงหน้า</span></div>
+      </div>
+      <div class="login-panel">
+        <div class="mobile-brand brand"><span class="brand-mark" aria-hidden="true">✚</span><span><strong>STOCK LOGISTICS</strong><small>SISAKET</small></span></div>
+        <div class="eyebrow"><span class="pulse"></span> ระบบคลังยาและเวชภัณฑ์</div>
+        <h1 id="login-title">ยินดีต้อนรับ</h1>
+        <p class="login-subtitle">เข้าสู่ระบบเพื่อจัดการคลังกลาง สสจ.ศรีสะเกษ</p>
+        <form id="login-form" novalidate>
+          <label class="field"><span>ชื่อผู้ใช้งาน</span><div class="input-wrap"><span class="input-icon" data-icon="user"></span><input id="username" name="username" autocomplete="username" value="admin" required></div></label>
+          <label class="field"><span>รหัสผ่าน</span><div class="input-wrap"><span class="input-icon" data-icon="lock"></span><input id="password" name="password" type="password" autocomplete="current-password" value="stock2569" required><button id="toggle-password" class="icon-button subtle" type="button" aria-label="แสดงรหัสผ่าน"><span data-icon="eye"></span></button></div></label>
+          <div id="login-error" class="form-error" role="alert"></div>
+          <button class="button primary wide" type="submit"><span data-icon="login"></span><span>เข้าสู่ระบบ</span></button>
+        </form>
+        <div class="demo-note"><strong>บัญชีสำหรับทดลอง</strong><span>admin / stock2569</span></div>
+        <p class="security-note"><span data-icon="shield"></span> ต้นแบบนี้ใช้ session ภายในเครื่อง ข้อมูล Excel ต้นฉบับจะไม่ถูกแก้ไข</p>
+      </div>
+    </div>
+  </section>
+
+  <div id="app-view" class="app-view" hidden>
+    <div class="app-ambient" aria-hidden="true"><i></i><i></i><i></i></div>
+    <header class="app-header">
+      <a class="brand" href="#dashboard" aria-label="ไปแดชบอร์ด"><span class="brand-mark" aria-hidden="true">✚</span><span><strong>STOCK LOGISTICS</strong><small>SISAKET PROVINCIAL HEALTH OFFICE</small></span></a>
+      <nav class="main-nav" aria-label="เมนูหลัก">
+        <a href="#dashboard" data-route="dashboard"><span data-icon="dashboard"></span><span>ภาพรวม</span></a>
+        <a href="#province" data-route="province"><span data-icon="network"></span><span>ภาพรวมจังหวัด</span></a>
+        <a href="#mapping" data-route="mapping"><span data-icon="sparkles"></span><span>AI Mapping</span></a>
+        <a href="#inbound" data-route="inbound"><span data-icon="inbound"></span><span>รับเข้า</span></a>
+        <a href="#outbound" data-route="outbound"><span data-icon="outbound"></span><span>เบิกจ่าย</span></a>
+        <a href="#stock" data-route="stock"><span data-icon="boxes"></span><span>คงคลัง</span></a>
+        <a href="#data" data-route="data"><span data-icon="database"></span><span>ข้อมูลและเชื่อมต่อ</span></a>
+      </nav>
+      <div class="header-actions">
+        <div class="system-live" title="คลังกลางออนไลน์"><b></b><span>LIVE</span></div>
+        <button class="icon-button header-button" id="alerts-button" aria-label="ดูรายการแจ้งเตือน"><span data-icon="bell"></span><b id="alert-count">0</b></button>
+        <div class="profile"><span class="avatar">ภก</span><span><strong id="profile-name">ผู้ดูแลคลัง</strong><small>ผู้ดูแลระบบ</small></span></div>
+        <button class="icon-button header-button" id="logout-button" aria-label="ออกจากระบบ"><span data-icon="logout"></span></button>
+      </div>
+    </header>
+    <main id="main-content" tabindex="-1"></main>
+    <nav class="mobile-nav" aria-label="เมนูมือถือ">
+      <a href="#dashboard" data-route="dashboard"><span data-icon="dashboard"></span><small>ภาพรวม</small></a>
+      <a href="#province" data-route="province"><span data-icon="network"></span><small>จังหวัด</small></a>
+      <a href="#mapping" data-route="mapping"><span data-icon="sparkles"></span><small>AI Map</small></a>
+      <a href="#inbound" data-route="inbound"><span data-icon="inbound"></span><small>รับเข้า</small></a>
+      <a href="#outbound" data-route="outbound"><span data-icon="outbound"></span><small>เบิกจ่าย</small></a>
+      <a href="#stock" data-route="stock"><span data-icon="boxes"></span><small>คงคลัง</small></a>
+      <a href="#data" data-route="data"><span data-icon="database"></span><small>ข้อมูล</small></a>
+    </nav>
+  </div>
+  <div id="toast-region" class="toast-region" aria-live="polite"></div>
+  <div id="modal-root"></div>
+  <script src="/app.js?v=6" defer></script>
+</body>
+</html>

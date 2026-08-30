@@ -131,10 +131,13 @@ test('valid inbound transaction persists and updates stock', async () => {
     method: 'POST', headers: { cookie, 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
     body: JSON.stringify({
       type: 'inbound', date: '2026-08-24', facility: 'องค์การเภสัชกรรม', refNo: 'TEST-IN-001',
+      attachment: { name: 'invoice-101.pdf', size: 1024, type: 'application/pdf', data: 'data:application/pdf;base64,JVBERi0xLjQK...' },
       items: [{ itemId: 'itm-004', qty: 2, lot: 'TEST-LOT', expiry: '2030-12-31' }]
     })
   });
   assert.equal(res.status, 201);
+  const created = await res.json();
+  assert.equal(created.transaction.attachment.name, 'invoice-101.pdf');
   const items = await fetch(`${base}/api/items`, { headers: { cookie } }).then(r => r.json());
   const item = items.items.find(i => i.id === 'itm-004');
   assert.equal(item.qty, 5);
@@ -148,4 +151,243 @@ test('CSV export includes source traceability', async () => {
   const csv = await res.text();
   assert.match(csv, /source_sheet/);
   assert.match(csv, /คงคลังปัจจุบัน/);
+});
+
+test('GET /api/items supports pagination and sorting', async () => {
+  const res = await fetch(`${base}/api/items?page=1&limit=5&sort=name&order=asc`, {
+    headers: { cookie }
+  });
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.equal(data.items.length, 5);
+  assert.equal(data.meta.page, 1);
+  assert.equal(data.meta.limit, 5);
+  assert.equal(data.meta.total, 23);
+  assert.equal(data.meta.totalPages, 5);
+});
+
+test('GET /api/items/:id returns item detail and related transactions', async () => {
+  const res = await fetch(`${base}/api/items/itm-001`, { headers: { cookie } });
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.equal(data.item.id, 'itm-001');
+  assert.ok(Array.isArray(data.transactions));
+});
+
+test('PUT /api/items/:id updates item details and logs audit', async () => {
+  const createRes = await fetch(`${base}/api/items`, {
+    method: 'POST',
+    headers: { cookie, 'X-CSRF-Token': csrf, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code: 'NEW-EDIT-1', name: 'ยาก่อนแก้', category: 'ยา', unit: 'ขวด' })
+  });
+  assert.equal(createRes.status, 201);
+  const created = (await createRes.json()).item;
+
+  const updateRes = await fetch(`${base}/api/items/${created.id}`, {
+    method: 'PUT',
+    headers: { cookie, 'X-CSRF-Token': csrf, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code: 'NEW-EDIT-1', name: 'ยาหลังแก้', category: 'ยา', unit: 'กล่อง', minQty: 15 })
+  });
+  assert.equal(updateRes.status, 200);
+  const updated = (await updateRes.json()).item;
+  assert.equal(updated.name, 'ยาหลังแก้');
+  assert.equal(updated.unit, 'กล่อง');
+  assert.equal(updated.minQty, 15);
+});
+
+test('DELETE /api/items/:id soft-deletes an item when qty is 0', async () => {
+  const createRes = await fetch(`${base}/api/items`, {
+    method: 'POST',
+    headers: { cookie, 'X-CSRF-Token': csrf, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code: 'DEL-TEST-1', name: 'ยารอลบ', category: 'ยา', unit: 'ขวด' })
+  });
+  const created = (await createRes.json()).item;
+
+  const delRes = await fetch(`${base}/api/items/${created.id}`, {
+    method: 'DELETE',
+    headers: { cookie, 'X-CSRF-Token': csrf }
+  });
+  assert.equal(delRes.status, 200);
+
+  const getRes = await fetch(`${base}/api/items/${created.id}`, { headers: { cookie } });
+  assert.equal(getRes.status, 200);
+  assert.equal((await getRes.json()).item.active, false);
+});
+
+test('GET /api/transactions supports pagination and sorting', async () => {
+  const res = await fetch(`${base}/api/transactions?page=1&limit=2&sort=date&order=desc`, {
+    headers: { cookie }
+  });
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.equal(data.transactions.length, 2);
+  assert.equal(data.meta.page, 1);
+  assert.equal(data.meta.limit, 2);
+  assert.ok(data.meta.total >= 5);
+});
+
+test('GET /api/transactions/:id returns transaction detail with item names', async () => {
+  const listRes = await fetch(`${base}/api/transactions`, { headers: { cookie } });
+  const txns = (await listRes.json()).transactions;
+  const firstTxn = txns[0];
+
+  const res = await fetch(`${base}/api/transactions/${firstTxn.id}`, { headers: { cookie } });
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.equal(data.transaction.id, firstTxn.id);
+  assert.ok(data.transaction.items[0].item);
+});
+
+test('POST /api/transactions/:id/void reverts inventory and marks status as voided', async () => {
+  const targetItemRes = await fetch(`${base}/api/items/itm-002`, { headers: { cookie } });
+  const initialQty = (await targetItemRes.json()).item.qty;
+
+  // Inbound 50
+  const inRes = await fetch(`${base}/api/transactions`, {
+    method: 'POST',
+    headers: { cookie, 'X-CSRF-Token': csrf, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      type: 'inbound',
+      facility: 'ผู้ส่งมอบทดสอบ',
+      date: '2026-08-26',
+      items: [{ itemId: 'itm-002', qty: 50 }]
+    })
+  });
+  assert.equal(inRes.status, 201);
+  const inTxn = (await inRes.json()).transaction;
+
+  // Verify stock increased
+  const checkRes1 = await fetch(`${base}/api/items/itm-002`, { headers: { cookie } });
+  assert.equal((await checkRes1.json()).item.qty, initialQty + 50);
+
+  // Void inbound
+  const voidRes = await fetch(`${base}/api/transactions/${inTxn.id}/void`, {
+    method: 'POST',
+    headers: { cookie, 'X-CSRF-Token': csrf, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason: 'บันทึกผิดพลาด' })
+  });
+  assert.equal(voidRes.status, 200);
+  assert.equal((await voidRes.json()).transaction.status, 'voided');
+
+  // Verify stock reverted back
+  const checkRes2 = await fetch(`${base}/api/items/itm-002`, { headers: { cookie } });
+  assert.equal((await checkRes2.json()).item.qty, initialQty);
+});
+
+test('GET /api/province/hospitals/:id returns hospital detail with mappings and rebalancing', async () => {
+  const res = await fetch(`${base}/api/province/hospitals/hsp-001`, { headers: { cookie } });
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.equal(data.hospital.id, 'hsp-001');
+  assert.ok(Array.isArray(data.mappings));
+  assert.ok(Array.isArray(data.rebalancing));
+});
+
+test('POST /api/rebalancing/:id/execute approves rebalancing', async () => {
+  const res = await fetch(`${base}/api/rebalancing/reb-001/execute`, {
+    method: 'POST',
+    headers: { cookie, 'X-CSRF-Token': csrf, 'Content-Type': 'application/json' }
+  });
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.equal(data.rebalancing.status, 'executed');
+});
+
+test('POST /api/rebalancing/:id/reject rejects rebalancing', async () => {
+  const res = await fetch(`${base}/api/rebalancing/reb-002/reject`, {
+    method: 'POST',
+    headers: { cookie, 'X-CSRF-Token': csrf, 'Content-Type': 'application/json' }
+  });
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.equal(data.rebalancing.status, 'rejected');
+});
+
+test('advanced mapping features: levenshtein, dosage parsing, category bonus, and feedback loop', async () => {
+  const { levenshtein, parseDosage, scoreCandidate, learnFromDecision } = require('../lib/mapping-engine');
+  
+  // Levenshtein
+  assert.equal(levenshtein('paracetamol', 'paracetamol'), 0);
+  assert.equal(levenshtein('gpo', 'gpa'), 1);
+
+  // Dosage parsing
+  assert.deepEqual(parseDosage('PARA 500mg GPO'), { value: 500, unit: 'mg' });
+  assert.deepEqual(parseDosage('Alcohol 70% 450ml'), { value: 70, unit: '%' });
+
+  // Category bonus
+  const source = { sourceName: 'ถุงมือตรวจโรค ไซส์ M', unit: 'กล่อง' };
+  const item1 = { id: 'itm-1', name: 'Glove Nitrile M', unit: 'กล่อง', category: 'เวชภัณฑ์', active: true };
+  const scoreMatching = scoreCandidate(source, item1, { sourceCategory: 'เวชภัณฑ์' });
+  const scoreMismatch = scoreCandidate(source, item1, { sourceCategory: 'ยา' });
+  assert.ok(scoreMatching.confidence > scoreMismatch.confidence);
+
+  // Feedback loop
+  const pcmSource = { sourceName: 'PCM 500 GPO TEST', unit: 'กล่อง' };
+  const pcmItem = { id: 'itm-pcm-test', name: 'Paracetamol 500 mg', unit: 'กล่อง', active: true };
+  const scoreBefore = scoreCandidate(pcmSource, pcmItem);
+  learnFromDecision({ sourceName: 'PCM 500 GPO TEST', itemId: 'itm-pcm-test', status: 'approved' });
+  const scoreAfter = scoreCandidate(pcmSource, pcmItem);
+  assert.ok(scoreAfter.confidence > scoreBefore.confidence);
+  assert.ok(scoreAfter.reasons.some(r => r.includes('เคยจับคู่รายการนี้แล้ว')));
+});
+
+test('GET /api/facilities, POST /api/facilities, and DELETE /api/facilities/:name manage facilities list', async () => {
+  // GET facilities
+  const getRes = await fetch(`${base}/api/facilities`, { headers: { cookie } });
+  assert.equal(getRes.status, 200);
+  const initialData = await getRes.json();
+  assert.ok(Array.isArray(initialData.facilities));
+  const initialCount = initialData.facilities.length;
+
+  // POST new facility
+  const addRes = await fetch(`${base}/api/facilities`, {
+    method: 'POST',
+    headers: { cookie, 'X-CSRF-Token': csrf, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'บริษัท ทดสอบเวชภัณฑ์ จำกัด' })
+  });
+  assert.equal(addRes.status, 201);
+  const afterAddData = await addRes.json();
+  assert.equal(afterAddData.facilities.length, initialCount + 1);
+  assert.ok(afterAddData.facilities.includes('บริษัท ทดสอบเวชภัณฑ์ จำกัด'));
+
+  // DELETE facility
+  const delRes = await fetch(`${base}/api/facilities/${encodeURIComponent('บริษัท ทดสอบเวชภัณฑ์ จำกัด')}`, {
+    method: 'DELETE',
+    headers: { cookie, 'X-CSRF-Token': csrf }
+  });
+  assert.equal(delRes.status, 200);
+  const afterDelData = await delRes.json();
+  assert.equal(afterDelData.facilities.length, initialCount);
+  assert.ok(!afterDelData.facilities.includes('บริษัท ทดสอบเวชภัณฑ์ จำกัด'));
+});
+
+test('POST /api/transactions/:id/memo updates memo status', async () => {
+  const txnsRes = await fetch(`${base}/api/transactions`, { headers: { cookie } });
+  const txns = (await txnsRes.json()).transactions;
+  const targetTxn = txns[0];
+
+  const updateRes = await fetch(`${base}/api/transactions/${targetTxn.id}/memo`, {
+    method: 'POST',
+    headers: { cookie, 'X-CSRF-Token': csrf, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ memoDone: true })
+  });
+  assert.equal(updateRes.status, 200);
+  const data = await updateRes.json();
+  assert.equal(data.transaction.memoDone, true);
+
+  const detailRes = await fetch(`${base}/api/transactions/${targetTxn.id}`, { headers: { cookie } });
+  assert.equal((await detailRes.json()).transaction.memoDone, true);
+});
+
+test('POST /api/logout clears session', async () => {
+  const res = await fetch(`${base}/api/logout`, {
+    method: 'POST',
+    headers: { cookie, 'Content-Type': 'application/json' }
+  });
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).ok, true);
+
+  // Subsequent call should fail
+  const check = await fetch(`${base}/api/session`, { headers: { cookie } });
+  assert.equal(check.status, 401);
 });

@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { suggestMappings } = require('./lib/mapping-engine');
+const { suggestMappings, learnFromDecision } = require('./lib/mapping-engine');
 
 const ROOT = __dirname;
 const PUBLIC = path.join(ROOT, 'public');
@@ -11,7 +11,48 @@ const DATA_DIR = path.join(ROOT, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const SEED_FILE = path.join(DATA_DIR, 'seed.json');
 const sessions = new Map();
-const MAX_BODY = 1_000_000;
+const MAX_BODY = 15_000_000;
+
+/* ── Rate Limiter (login) ── */
+const loginAttempts = new Map();
+const RATE_LIMIT_MAX = 5;
+const RATE_LIMIT_WINDOW = 15 * 60 * 1000;
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const record = loginAttempts.get(ip);
+  if (!record || now - record.windowStart > RATE_LIMIT_WINDOW) {
+    loginAttempts.set(ip, { windowStart: now, count: 1 });
+    return true;
+  }
+  record.count++;
+  if (record.count > RATE_LIMIT_MAX) return false;
+  return true;
+}
+
+/* ── Pagination Helper ── */
+function paginate(arr, query) {
+  const page = Math.max(1, parseInt(query.get('page')) || 1);
+  const limit = Math.min(200, Math.max(1, parseInt(query.get('limit')) || 50));
+  const total = arr.length;
+  const totalPages = Math.ceil(total / limit) || 1;
+  const start = (page - 1) * limit;
+  return { data: arr.slice(start, start + limit), meta: { total, page, limit, totalPages } };
+}
+
+/* ── Sorting Helper ── */
+function sortArray(arr, query, allowed) {
+  const sortField = query.get('sort');
+  const order = query.get('order') === 'desc' ? -1 : 1;
+  if (!sortField || !allowed.includes(sortField)) return arr;
+  return [...arr].sort((a, b) => {
+    const va = a[sortField], vb = b[sortField];
+    if (va == null && vb == null) return 0;
+    if (va == null) return 1;
+    if (vb == null) return -1;
+    if (typeof va === 'number') return (va - vb) * order;
+    return String(va).localeCompare(String(vb), 'th') * order;
+  });
+}
 
 const mime = {
   '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8',
@@ -114,6 +155,11 @@ function csvCell(value) { return `"${String(value ?? '').replaceAll('"', '""')}"
 async function api(req, res, url) {
   if (req.method === 'GET' && url.pathname === '/api/health') return json(res, 200, { ok: true, service: 'stock-logistics-sisaket' });
   if (req.method === 'POST' && url.pathname === '/api/login') {
+    const ip = req.socket.remoteAddress || 'unknown';
+    if (!checkRateLimit(ip)) {
+      res.setHeader('Retry-After', '900');
+      return error(res, 429, 'RATE_LIMITED', 'พยายามเข้าสู่ระบบมากเกินไป กรุณารอ 15 นาที');
+    }
     const input = await body(req);
     const user = process.env.STOCK_DEMO_USERNAME || 'admin';
     const pass = process.env.STOCK_DEMO_PASSWORD || 'stock2569';
@@ -172,6 +218,44 @@ async function api(req, res, url) {
     });
   }
 
+  const hospitalDetailMatch = url.pathname.match(/^\/api\/province\/hospitals\/([^/]+)$/);
+  if (req.method === 'GET' && hospitalDetailMatch) {
+    const hspId = hospitalDetailMatch[1];
+    const hospital = (db.hospitalNetwork || []).find(h => h.id === hspId);
+    if (!hospital) return error(res, 404, 'NOT_FOUND', 'ไม่พบข้อมูลโรงพยาบาล');
+    const hospitalMappings = (db.mappingQueue || []).filter(m => m.hospitalId === hspId).map(m => enrichMapping(m, db));
+    const hospitalRebalancing = (db.rebalancing || []).filter(r => r.fromHospitalId === hspId || r.toHospitalId === hspId).map(row => ({
+      ...row,
+      item: db.items.find(i => i.id === row.itemId),
+      from: (db.hospitalNetwork || []).find(h => h.id === row.fromHospitalId),
+      to: (db.hospitalNetwork || []).find(h => h.id === row.toHospitalId)
+    }));
+    return json(res, 200, { hospital, mappings: hospitalMappings, rebalancing: hospitalRebalancing });
+  }
+
+  const rebalanceExecMatch = url.pathname.match(/^\/api\/rebalancing\/([^/]+)\/(execute|reject)$/);
+  if (req.method === 'POST' && rebalanceExecMatch) {
+    if (s.user.role !== 'admin') return error(res, 403, 'FORBIDDEN', 'เฉพาะผู้ดูแลที่ได้รับมอบหมายเท่านั้น');
+    const [_, rebId, actionType] = rebalanceExecMatch;
+    const reb = (db.rebalancing || []).find(r => r.id === rebId);
+    if (!reb) return error(res, 404, 'NOT_FOUND', 'ไม่พบรายการโยกย้ายสต็อก');
+    if (reb.status === 'executed' || reb.status === 'rejected') return error(res, 409, 'ALREADY_PROCESSED', 'รายการนี้ได้รับการดำเนินการแล้ว');
+    reb.status = actionType === 'execute' ? 'executed' : 'rejected';
+    reb.processedAt = new Date().toISOString();
+    reb.processedBy = s.user.id;
+    db.audit.push({
+      id: `aud-${crypto.randomUUID()}`,
+      action: actionType === 'execute' ? 'REBALANCE_EXECUTE' : 'REBALANCE_REJECT',
+      entity: 'rebalancing',
+      entityId: reb.id,
+      user: s.user.id,
+      at: reb.processedAt,
+      detail: `${actionType === 'execute' ? 'อนุมัติ' : 'ปฏิเสธ'}การโยกย้ายสต็อก: ${reb.id}`
+    });
+    await writeDb(db);
+    return json(res, 200, { rebalancing: reb, ok: true });
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/ai/mappings') {
     const status = url.searchParams.get('status') || 'open';
     const allowed = ['open', 'all', 'pending', 'review', 'approved', 'rejected'];
@@ -179,8 +263,22 @@ async function api(req, res, url) {
     let mappings = db.mappingQueue || [];
     if (status === 'open') mappings = mappings.filter(m => ['pending', 'review'].includes(m.status));
     else if (status !== 'all') mappings = mappings.filter(m => m.status === status);
-    mappings = mappings.map(m => enrichMapping(m, db)).sort((a, b) => b.confidence - a.confidence || a.id.localeCompare(b.id));
+    mappings = mappings.map(m => enrichMapping(m, db));
+    
+    // Sort
+    const sortField = url.searchParams.get('sort');
+    if (sortField) {
+      mappings = sortArray(mappings, url.searchParams, ['confidence', 'sourceName', 'sourceCode', 'status', 'createdAt']);
+    } else {
+      mappings.sort((a, b) => b.confidence - a.confidence || a.id.localeCompare(b.id));
+    }
+
     const counts = (db.mappingQueue || []).reduce((acc, m) => (acc[m.status] = (acc[m.status] || 0) + 1, acc), { pending: 0, review: 0, approved: 0, rejected: 0 });
+    
+    if (url.searchParams.has('page') || url.searchParams.has('limit')) {
+      const paged = paginate(mappings, url.searchParams);
+      return json(res, 200, { engine: { mode: 'hybrid-deterministic-fallback', requiresHumanApproval: true, version: '1.0' }, counts, mappings: paged.data, meta: paged.meta, hospitals: db.hospitalNetwork.map(h => ({ id: h.id, name: h.name, system: h.system })) });
+    }
     return json(res, 200, { engine: { mode: 'hybrid-deterministic-fallback', requiresHumanApproval: true, version: '1.0' }, counts, mappings, hospitals: db.hospitalNetwork.map(h => ({ id: h.id, name: h.name, system: h.system })) });
   }
 
@@ -191,7 +289,7 @@ async function api(req, res, url) {
     const unit = String(input.unit || '').trim();
     const hospital = db.hospitalNetwork.find(h => h.id === input.hospitalId);
     if (!hospital || sourceName.length < 3 || sourceName.length > 240 || unit.length < 1 || unit.length > 40) return error(res, 422, 'VALIDATION_FAILED', 'เลือกโรงพยาบาล และกรอกชื่อกับหน่วยให้ถูกต้อง');
-    const suggestions = suggestMappings({ sourceName, sourceCode, unit }, db.items, 3).map(result => ({ ...result, item: db.items.find(i => i.id === result.itemId) }));
+    const suggestions = suggestMappings({ sourceName, sourceCode, unit }, db.items, 3, { sourceCategory: input.category }).map(result => ({ ...result, item: db.items.find(i => i.id === result.itemId) }));
     return json(res, 200, { engine: { mode: 'hybrid-deterministic-fallback', requiresHumanApproval: true }, source: { hospitalId: hospital.id, hospitalName: hospital.name, sourceCode, sourceName, unit }, suggestions });
   }
 
@@ -209,6 +307,8 @@ async function api(req, res, url) {
       if (!decidedItem) return error(res, 422, 'VALIDATION_FAILED', 'ไม่พบรายการกลางที่ต้องการผูก');
       mapping.status = 'approved';
       mapping.decidedItemId = decidedItem.id;
+      // Learn from decision
+      learnFromDecision({ sourceName: mapping.sourceName, itemId: decidedItem.id, status: 'approved' }, db.items);
     } else {
       mapping.status = 'rejected';
       mapping.decidedItemId = null;
@@ -221,16 +321,83 @@ async function api(req, res, url) {
     return json(res, 200, { mapping: enrichMapping(mapping, db) });
   }
 
+  const itemDetailMatch = url.pathname.match(/^\/api\/items\/([^/]+)$/);
+  if (itemDetailMatch) {
+    const itemId = itemDetailMatch[1];
+    const itemIndex = db.items.findIndex(i => i.id === itemId);
+    const item = db.items[itemIndex];
+
+    if (req.method === 'GET') {
+      if (!item) return error(res, 404, 'NOT_FOUND', 'ไม่พบรายการยาหรือเวชภัณฑ์');
+      const relatedTransactions = db.transactions.filter(t => t.items && t.items.some(i => i.itemId === item.id)).sort((a, b) => b.date.localeCompare(a.date));
+      return json(res, 200, { item: enrich(item), transactions: relatedTransactions });
+    }
+
+    if (req.method === 'PUT') {
+      if (s.user.role !== 'admin') return error(res, 403, 'FORBIDDEN', 'เฉพาะผู้ดูแลที่ได้รับมอบหมายเท่านั้น');
+      if (!item || !item.active) return error(res, 404, 'NOT_FOUND', 'ไม่พบรายการที่ต้องการแก้ไข');
+      const input = await body(req);
+      const required = ['code', 'name', 'category', 'unit'];
+      const missing = required.filter(k => !String(input[k] || '').trim());
+      if (missing.length) return error(res, 422, 'VALIDATION_FAILED', 'กรอกข้อมูลจำเป็นให้ครบ', Object.fromEntries(missing.map(k => [k, 'จำเป็น'])));
+      
+      const newCode = input.code.trim();
+      if (newCode.toLowerCase() !== item.code.toLowerCase() && db.items.some(i => i.id !== item.id && i.code.toLowerCase() === newCode.toLowerCase())) {
+        return error(res, 409, 'DUPLICATE_CODE', 'รหัสรายการนี้มีอยู่แล้วในระบบ');
+      }
+
+      item.code = newCode;
+      item.name = input.name.trim();
+      item.category = input.category.trim();
+      item.unit = input.unit.trim();
+      item.package = String(input.package || '').trim();
+      item.minQty = Math.max(0, Number(input.minQty) || 0);
+      item.location = String(input.location || '').trim();
+      if (input.lot !== undefined) item.lot = String(input.lot || '').trim();
+      if (input.expiry !== undefined) item.expiry = input.expiry || null;
+
+      db.audit.push({ id: `aud-${crypto.randomUUID()}`, action: 'UPDATE', entity: 'item', entityId: item.id, user: s.user.id, at: new Date().toISOString(), detail: `แก้ไขรายการ ${item.code} (${item.name})` });
+      await writeDb(db);
+      return json(res, 200, { item: enrich(item) });
+    }
+
+    if (req.method === 'DELETE') {
+      if (s.user.role !== 'admin') return error(res, 403, 'FORBIDDEN', 'เฉพาะผู้ดูแลที่ได้รับมอบหมายเท่านั้น');
+      if (!item || !item.active) return error(res, 404, 'NOT_FOUND', 'ไม่พบรายการที่ต้องการลบ');
+      if (item.qty > 0) {
+        return error(res, 409, 'CANNOT_DELETE', `ไม่สามารถลบรายการ ${item.name} ได้เนื่องจากยังมียอดคงเหลือ ${item.qty} ${item.unit}`);
+      }
+      item.active = false;
+      db.audit.push({ id: `aud-${crypto.randomUUID()}`, action: 'DELETE', entity: 'item', entityId: item.id, user: s.user.id, at: new Date().toISOString(), detail: `ลบรายการ ${item.code} (${item.name})` });
+      await writeDb(db);
+      return json(res, 200, { ok: true, message: `ลบรายการ ${item.name} เรียบร้อยแล้ว` });
+    }
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/items') {
     const q = (url.searchParams.get('q') || '').trim().toLowerCase();
     const status = url.searchParams.get('status') || 'all';
     const category = url.searchParams.get('category') || 'all';
     let rows = db.items.filter(i => i.active).map(enrich);
-    if (q) rows = rows.filter(i => `${i.code} ${i.name} ${i.lot}`.toLowerCase().includes(q));
+    if (q) rows = rows.filter(i => `${i.code} ${i.name} ${i.lot} ${i.location}`.toLowerCase().includes(q));
     if (status !== 'all') rows = rows.filter(i => i.status === status);
     if (category !== 'all') rows = rows.filter(i => i.category === category);
-    rows.sort((a, b) => a.name.localeCompare(b.name, 'th'));
-    return json(res, 200, { items: rows, categories: [...new Set(db.items.map(i => i.category))].sort() });
+    
+    // Sort
+    const sortField = url.searchParams.get('sort');
+    if (sortField) {
+      rows = sortArray(rows, url.searchParams, ['code', 'name', 'category', 'qty', 'unit', 'minQty', 'expiry', 'status', 'location']);
+    } else {
+      rows.sort((a, b) => a.name.localeCompare(b.name, 'th'));
+    }
+
+    const categories = [...new Set(db.items.map(i => i.category))].sort();
+
+    if (url.searchParams.has('page') || url.searchParams.has('limit')) {
+      const paged = paginate(rows, url.searchParams);
+      return json(res, 200, { items: paged.data, meta: paged.meta, categories });
+    }
+    return json(res, 200, { items: rows, categories });
   }
 
   if (req.method === 'POST' && url.pathname === '/api/items') {
@@ -246,9 +413,88 @@ async function api(req, res, url) {
     return json(res, 201, { item: enrich(item) });
   }
 
+  const txnVoidMatch = url.pathname.match(/^\/api\/transactions\/([^/]+)\/void$/);
+  if (req.method === 'POST' && txnVoidMatch) {
+    if (s.user.role !== 'admin') return error(res, 403, 'FORBIDDEN', 'เฉพาะผู้ดูแลที่ได้รับมอบหมายเท่านั้น');
+    const input = await body(req);
+    const txn = db.transactions.find(t => t.id === txnVoidMatch[1]);
+    if (!txn) return error(res, 404, 'NOT_FOUND', 'ไม่พบเอกสารทำรายการ');
+    if (txn.status === 'voided') return error(res, 409, 'ALREADY_VOIDED', 'เอกสารนี้ถูกยกเลิกแล้ว');
+
+    if (txn.type === 'inbound') {
+      // Check if stock is sufficient to deduct
+      for (const line of txn.items) {
+        const item = db.items.find(i => i.id === line.itemId);
+        if (item && item.qty < line.qty) {
+          return error(res, 409, 'INSUFFICIENT_STOCK', `ไม่สามารถยกเลิกได้: ยอดคงเหลือของ ${item.name} มีเพียง ${item.qty} ${item.unit} (ต้องหักออก ${line.qty} ${item.unit})`);
+        }
+      }
+      // Revert inbound: subtract
+      for (const line of txn.items) {
+        const item = db.items.find(i => i.id === line.itemId);
+        if (item) item.qty -= line.qty;
+      }
+    } else if (txn.type === 'outbound') {
+      // Revert outbound: add back
+      for (const line of txn.items) {
+        const item = db.items.find(i => i.id === line.itemId);
+        if (item) item.qty += line.qty;
+      }
+    }
+
+    txn.status = 'voided';
+    txn.voidedAt = new Date().toISOString();
+    txn.voidedBy = s.user.id;
+    txn.voidReason = String(input.reason || 'ยกเลิกเอกสาร').trim();
+
+    db.audit.push({ id: `aud-${crypto.randomUUID()}`, action: 'VOID', entity: 'transaction', entityId: txn.id, user: s.user.id, at: txn.voidedAt, detail: `ยกเลิกเอกสาร ${txn.refNo} (เหตุผล: ${txn.voidReason})` });
+    await writeDb(db);
+    return json(res, 200, { transaction: txn, ok: true });
+  }
+
+  const txnMemoMatch = url.pathname.match(/^\/api\/transactions\/([^/]+)\/memo$/);
+  if (req.method === 'POST' && txnMemoMatch) {
+    const input = await body(req);
+    const txn = db.transactions.find(t => t.id === txnMemoMatch[1]);
+    if (!txn) return error(res, 404, 'NOT_FOUND', 'ไม่พบเอกสารทำรายการ');
+    txn.memoDone = Boolean(input.memoDone);
+    txn.memoUpdatedAt = new Date().toISOString();
+    txn.memoUpdatedBy = s.user.id;
+    db.audit.push({ id: `aud-${crypto.randomUUID()}`, action: 'UPDATE_MEMO', entity: 'transaction', entityId: txn.id, user: s.user.id, at: txn.memoUpdatedAt, detail: `${txn.memoDone ? 'บันทึกทำข้อความแล้ว' : 'ยกเลิกสถานะบันทึกข้อความ'} สำหรับ ${txn.refNo}` });
+    await writeDb(db);
+    return json(res, 200, { transaction: txn, ok: true });
+  }
+
+  const txnDetailMatch = url.pathname.match(/^\/api\/transactions\/([^/]+)$/);
+  if (req.method === 'GET' && txnDetailMatch) {
+    const txn = db.transactions.find(t => t.id === txnDetailMatch[1]);
+    if (!txn) return error(res, 404, 'NOT_FOUND', 'ไม่พบเอกสารทำรายการ');
+    const enrichedItems = txn.items.map(line => {
+      const item = db.items.find(i => i.id === line.itemId);
+      return { ...line, item: item ? enrich(item) : null };
+    });
+    return json(res, 200, { transaction: { ...txn, items: enrichedItems } });
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/transactions') {
     const type = url.searchParams.get('type');
-    const rows = db.transactions.filter(t => !type || t.type === type).map(t => ({ ...t, lineCount: t.items.length, totalQty: t.items.reduce((n, i) => n + i.qty, 0) })).sort((a, b) => b.date.localeCompare(a.date));
+    const q = (url.searchParams.get('q') || '').trim().toLowerCase();
+    let rows = db.transactions.filter(t => !type || t.type === type);
+    if (q) rows = rows.filter(t => `${t.refNo} ${t.facility} ${t.note || ''}`.toLowerCase().includes(q));
+    rows = rows.map(t => ({ ...t, lineCount: t.items.length, totalQty: t.items.reduce((n, i) => n + i.qty, 0) }));
+    
+    // Sort
+    const sortField = url.searchParams.get('sort');
+    if (sortField) {
+      rows = sortArray(rows, url.searchParams, ['date', 'refNo', 'facility', 'type', 'status', 'totalQty', 'createdAt']);
+    } else {
+      rows.sort((a, b) => b.date.localeCompare(a.date));
+    }
+
+    if (url.searchParams.has('page') || url.searchParams.has('limit')) {
+      const paged = paginate(rows, url.searchParams);
+      return json(res, 200, { transactions: paged.data, meta: paged.meta, facilities: db.facilities });
+    }
     return json(res, 200, { transactions: rows, facilities: db.facilities });
   }
 
@@ -268,14 +514,52 @@ async function api(req, res, url) {
       row.item.qty += input.type === 'inbound' ? row.qty : -row.qty;
       if (input.type === 'inbound') { row.item.lot = row.lot || row.item.lot; row.item.expiry = row.expiry || row.item.expiry; }
     }
-    const txn = { id: `txn-${crypto.randomUUID()}`, type: input.type, refNo: String(input.refNo || '').trim() || `${input.type === 'inbound' ? 'IN' : 'OUT'}-${Date.now()}`, facility: String(input.facility).trim(), date: input.date, status: 'posted', items: normalized.map(r => ({ itemId: r.item.id, qty: r.qty, lot: r.lot, expiry: r.expiry })), note: String(input.note || '').trim(), createdBy: s.user.id, createdAt: new Date().toISOString() };
+    const attachment = (input.attachment && typeof input.attachment === 'object' && input.attachment.data) ? {
+      name: String(input.attachment.name || 'bill-file').slice(0, 200),
+      type: String(input.attachment.type || '').slice(0, 100),
+      size: Number(input.attachment.size || 0),
+      data: String(input.attachment.data || '')
+    } : null;
+    const txn = { id: `txn-${crypto.randomUUID()}`, type: input.type, refNo: String(input.refNo || '').trim() || `${input.type === 'inbound' ? 'IN' : 'OUT'}-${Date.now()}`, facility: String(input.facility).trim(), date: input.date, status: 'posted', items: normalized.map(r => ({ itemId: r.item.id, qty: r.qty, lot: r.lot, expiry: r.expiry })), note: String(input.note || '').trim(), attachment, createdBy: s.user.id, createdAt: new Date().toISOString() };
     db.transactions.push(txn);
-    db.audit.push({ id: `aud-${crypto.randomUUID()}`, action: input.type === 'inbound' ? 'RECEIVE' : 'ISSUE', entity: 'transaction', entityId: txn.id, user: s.user.id, at: txn.createdAt, detail: `${txn.refNo} ${txn.items.length} รายการ` });
+    db.audit.push({ id: `aud-${crypto.randomUUID()}`, action: input.type === 'inbound' ? 'RECEIVE' : 'ISSUE', entity: 'transaction', entityId: txn.id, user: s.user.id, at: txn.createdAt, detail: `${txn.refNo} ${txn.items.length} รายการ${attachment ? ' (มีแนบบิล)' : ''}` });
     await writeDb(db);
     return json(res, 201, { transaction: txn });
   }
 
-  if (req.method === 'GET' && url.pathname === '/api/master-data') return json(res, 200, { facilities: db.facilities, integrations: db.integrations, meta: db.meta, audit: db.audit.slice(-12).reverse() });
+  if (req.method === 'GET' && url.pathname === '/api/facilities') {
+    return json(res, 200, { facilities: db.facilities || [] });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/facilities') {
+    if (s.user.role !== 'admin') return error(res, 403, 'FORBIDDEN', 'เฉพาะผู้ดูแลที่ได้รับมอบหมายเท่านั้น');
+    const input = await body(req);
+    const name = String(input.name || '').trim();
+    if (!name || name.length < 2 || name.length > 120) return error(res, 422, 'VALIDATION_FAILED', 'กรอกชื่อหน่วยงาน/ผู้ส่งมอบความยาว 2-120 ตัวอักษร');
+    if (!db.facilities) db.facilities = [];
+    if (db.facilities.some(f => f.toLowerCase() === name.toLowerCase())) {
+      return error(res, 409, 'DUPLICATE_NAME', 'มีชื่อหน่วยงาน/ผู้ส่งมอบนี้อยู่ในระบบแล้ว');
+    }
+    db.facilities.push(name);
+    db.audit.push({ id: `aud-${crypto.randomUUID()}`, action: 'CREATE_FACILITY', entity: 'facility', entityId: name, user: s.user.id, at: new Date().toISOString(), detail: `เพิ่มหน่วยงาน/ผู้ส่งมอบ: ${name}` });
+    await writeDb(db);
+    return json(res, 201, { facilities: db.facilities, name });
+  }
+
+  const facilityDeleteMatch = url.pathname.match(/^\/api\/facilities\/([^/]+)$/);
+  if (req.method === 'DELETE' && facilityDeleteMatch) {
+    if (s.user.role !== 'admin') return error(res, 403, 'FORBIDDEN', 'เฉพาะผู้ดูแลที่ได้รับมอบหมายเท่านั้น');
+    const targetName = decodeURIComponent(facilityDeleteMatch[1]).trim();
+    if (!db.facilities) db.facilities = [];
+    const index = db.facilities.findIndex(f => f.toLowerCase() === targetName.toLowerCase());
+    if (index === -1) return error(res, 404, 'NOT_FOUND', 'ไม่พบชื่อหน่วยงาน/ผู้ส่งมอบนี้');
+    const removed = db.facilities.splice(index, 1)[0];
+    db.audit.push({ id: `aud-${crypto.randomUUID()}`, action: 'DELETE_FACILITY', entity: 'facility', entityId: removed, user: s.user.id, at: new Date().toISOString(), detail: `ลบหน่วยงาน/ผู้ส่งมอบ: ${removed}` });
+    await writeDb(db);
+    return json(res, 200, { facilities: db.facilities, ok: true });
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/master-data') return json(res, 200, { facilities: db.facilities, integrations: db.integrations, meta: db.meta, audit: db.audit.slice(-20).reverse() });
 
   if (req.method === 'GET' && url.pathname === '/api/v1/stock') return json(res, 200, { apiVersion: '1.0', generatedAt: new Date().toISOString(), warehouse: db.meta.warehouse, data: db.items.filter(i => i.active).map(enrich) });
 

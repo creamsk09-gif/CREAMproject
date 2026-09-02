@@ -1,0 +1,9 @@
+TH Sarabun New
+
+Creator: SIPA / Supakit Chalermlarp
+Source: https://www.f0nt.com/release/th-sarabun-new/
+License: GNU General Public License 2.0 with Font Exception
+
+The font files are bundled so official documents render consistently on
+production systems that do not have TH Sarabun New installed. See the source
+page for the complete license terms and the original download package.

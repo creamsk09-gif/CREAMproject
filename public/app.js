@@ -867,10 +867,13 @@ async function submitMappingSuggest(e) {
       method: 'POST',
       body: JSON.stringify(input)
     });
+    const engineLabel = d.engine?.mode?.endsWith('-rerank')
+      ? `AI ${esc(d.engine.model || '')} · ต้องให้เจ้าหน้าที่ตรวจยืนยัน`
+      : 'โหมดสำรองภายในเครื่อง · ต้องให้เจ้าหน้าที่ตรวจยืนยัน';
     $('#ai-suggest-results').innerHTML = `
       <div class="suggest-head">
         <span>${icon('sparkles')}</span>
-        <div><strong>พบ ${d.suggestions.length} รายการใกล้เคียง</strong><small>${esc(d.source.sourceName)}</small></div>
+        <div><strong>พบ ${d.suggestions.length} รายการใกล้เคียง</strong><small>${esc(d.source.sourceName)} · ${engineLabel}</small></div>
       </div>
       ${d.suggestions.map((s, i) => `
         <article class="suggest-card ${i === 0 ? 'best' : ''}">
@@ -1281,6 +1284,27 @@ function thaiFullDate(dateStr) {
   return `${day} ${month} พ.ศ. ${year}`;
 }
 
+function officialDocumentFontCss() {
+  const fontBase = `${window.location.origin}/fonts`;
+  return `
+    @font-face { font-family: 'TH Sarabun New'; src: url('${fontBase}/THSarabunNew-Regular.ttf') format('truetype'); font-weight: 400; font-style: normal; font-display: block; }
+    @font-face { font-family: 'TH Sarabun New'; src: url('${fontBase}/THSarabunNew-Bold.ttf') format('truetype'); font-weight: 700; font-style: normal; font-display: block; }
+    @font-face { font-family: 'TH Sarabun New'; src: url('${fontBase}/THSarabunNew-Italic.ttf') format('truetype'); font-weight: 400; font-style: italic; font-display: block; }
+    @font-face { font-family: 'TH Sarabun New'; src: url('${fontBase}/THSarabunNew-BoldItalic.ttf') format('truetype'); font-weight: 700; font-style: italic; font-display: block; }
+  `;
+}
+
+function prepareOfficialPrintWindow(printWindow) {
+  const button = printWindow.document.getElementById('print-document-btn');
+  if (!button) return;
+  const ready = printWindow.document.fonts?.ready || Promise.resolve();
+  ready.finally(() => {
+    button.disabled = false;
+    button.textContent = button.dataset.readyLabel;
+  });
+  button.addEventListener('click', () => printWindow.print());
+}
+
 function printMemoDocument(t) {
   const isInbound = t.type === 'inbound';
   const docTitle = isInbound ? 'รายงานการรับมอบยาและเวชภัณฑ์เข้าคลังกลาง' : 'ขออนุมัติเบิกจ่ายยาและเวชภัณฑ์ออกจากคลังกลาง';
@@ -1307,85 +1331,93 @@ function printMemoDocument(t) {
 <head>
   <meta charset="UTF-8">
   <title>บันทึกข้อความ - ${esc(t.refNo)}</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Sarabun:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400;1,700&display=swap" rel="stylesheet">
   <style>
+    ${officialDocumentFontCss()}
     @page { size: A4 portrait; margin: 20mm 20mm 20mm 25mm; }
+    * { box-sizing: border-box; }
+    html { background: #e5e7eb; }
     body {
-      font-family: 'Sarabun', 'TH Sarabun New', sans-serif;
+      font-family: 'TH Sarabun New', sans-serif;
       font-size: 16pt;
-      line-height: 1.5;
+      line-height: 1.18;
       color: #000;
       background: #fff;
       margin: 0;
-      padding: 20px;
+      min-height: 257mm;
     }
     .memo-header {
       display: flex;
-      align-items: flex-end;
+      align-items: center;
       position: relative;
-      margin-bottom: 25px;
-      border-bottom: 2.5px solid #000;
-      padding-bottom: 8px;
+      margin-bottom: 8mm;
+      border-bottom: 1.5pt solid #000;
+      padding-bottom: 2mm;
     }
     .garuda {
-      width: 60px;
-      height: 60px;
-      margin-right: 20px;
+      width: 15mm;
+      height: 15mm;
+      object-fit: contain;
+      margin-right: 6mm;
     }
     .memo-title {
-      font-size: 28pt;
-      font-weight: bold;
-      letter-spacing: 4px;
+      font-size: 29pt;
+      font-weight: 700;
+      letter-spacing: .5pt;
       line-height: 1;
       margin: 0;
     }
     .meta-table {
       width: 100%;
-      margin-bottom: 15px;
+      margin-bottom: 4mm;
       border-collapse: collapse;
       font-size: 16pt;
     }
     .meta-table td {
-      padding: 4px 0;
+      padding: 1mm 0;
       vertical-align: top;
     }
     .body-p {
       text-indent: 2.5cm;
-      margin: 14px 0;
+      margin: 3mm 0;
       text-align: justify;
+      orphans: 3;
+      widows: 3;
     }
     table.data-table {
       width: 100%;
       border-collapse: collapse;
-      margin: 18px 0;
-      font-size: 14pt;
+      margin: 4mm 0;
+      font-size: 16pt;
+      page-break-inside: auto;
     }
     table.data-table th, table.data-table td {
-      border: 1px solid #000;
-      padding: 6px 10px;
+      border: .75pt solid #000;
+      padding: 1.2mm 1.8mm;
+      line-height: 1.08;
     }
     table.data-table th {
       background: #f5f5f5;
       text-align: center;
       font-weight: bold;
     }
+    table.data-table thead { display: table-header-group; }
+    table.data-table tr { page-break-inside: avoid; }
+    table.data-table small { font-size: 14pt; }
     .signature-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 30px;
-      margin-top: 40px;
+      gap: 10mm;
+      margin-top: 10mm;
       page-break-inside: avoid;
     }
     .sign-box {
       text-align: center;
     }
     .sign-line {
-      margin-top: 50px;
+      margin-top: 12mm;
       display: inline-block;
-      width: 220px;
-      border-bottom: 1px dotted #000;
+      width: 58mm;
+      border-bottom: .75pt dotted #000;
     }
     .no-print-bar {
       background: #f1f5f9;
@@ -1404,22 +1436,25 @@ function printMemoDocument(t) {
       border-radius: 6px;
       cursor: pointer;
     }
+    .print-btn:disabled { opacity: .55; cursor: wait; }
+    @media screen {
+      body { width: 210mm; margin: 12mm auto; padding: 20mm 20mm 20mm 25mm; box-shadow: 0 12px 36px rgba(15,23,42,.18); }
+      .no-print-bar { margin: -20mm -20mm 10mm -25mm; }
+    }
     @media print {
       .no-print-bar { display: none !important; }
-      body { padding: 0 !important; }
+      html, body { background: #fff !important; }
+      body { width: auto; min-height: 0; padding: 0 !important; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
     }
   </style>
 </head>
 <body>
   <div class="no-print-bar">
-    <button class="print-btn" onclick="window.print()">🖨 พิมพ์เอกสารบันทึกข้อความ (Print)</button>
+    <button class="print-btn" id="print-document-btn" data-ready-label="พิมพ์ / บันทึกเป็น PDF" disabled>กำลังเตรียมฟอนต์ TH Sarabun New...</button>
   </div>
 
   <div class="memo-header">
-    <svg class="garuda" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-      <path d="M12 2L4 6v6c0 5.5 3.8 10.7 8 12 4.2-1.3 8-6.5 8-12V6l-8-4z"/>
-      <path d="M9 12l2 2 4-4"/>
-    </svg>
+    <img class="garuda" src="${window.location.origin}/garuda.svg" alt="ตราครุฑ">
     <h1 class="memo-title">บันทึกข้อความ</h1>
   </div>
 
@@ -1487,6 +1522,7 @@ function printMemoDocument(t) {
   printWindow.document.open();
   printWindow.document.write(html);
   printWindow.document.close();
+  prepareOfficialPrintWindow(printWindow);
 }
 
 function printThankYouDocument(t) {
@@ -1512,71 +1548,77 @@ function printThankYouDocument(t) {
 <head>
   <meta charset="UTF-8">
   <title>หนังสือขอบคุณ - ${esc(t.facility)}</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Sarabun:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400;1,700&display=swap" rel="stylesheet">
   <style>
+    ${officialDocumentFontCss()}
     @page { size: A4 portrait; margin: 25mm 20mm 20mm 25mm; }
+    * { box-sizing: border-box; }
+    html { background: #e5e7eb; }
     body {
-      font-family: 'Sarabun', 'TH Sarabun New', sans-serif;
+      font-family: 'TH Sarabun New', sans-serif;
       font-size: 16pt;
-      line-height: 1.6;
+      line-height: 1.18;
       color: #000;
       background: #fff;
       margin: 0;
-      padding: 20px;
+      min-height: 252mm;
     }
     .gov-letter-header {
       text-align: center;
-      margin-bottom: 25px;
+      margin-bottom: 6mm;
     }
     .garuda {
-      width: 75px;
-      height: 75px;
-      margin-bottom: 10px;
+      width: 30mm;
+      height: 30mm;
+      object-fit: contain;
+      margin-bottom: 2mm;
     }
     .gov-letter-head-table {
       width: 100%;
       border-collapse: collapse;
-      margin-bottom: 15px;
+      margin-bottom: 4mm;
       font-size: 16pt;
     }
     .gov-letter-head-table td {
       vertical-align: top;
-      padding: 3px 0;
+      padding: 1mm 0;
     }
     .body-p {
       text-indent: 2.5cm;
-      margin: 16px 0;
+      margin: 3mm 0;
       text-align: justify;
+      orphans: 3;
+      widows: 3;
     }
     table.data-table {
       width: 100%;
       border-collapse: collapse;
-      margin: 18px 0;
-      font-size: 14pt;
+      margin: 4mm 0;
+      font-size: 16pt;
     }
     table.data-table th, table.data-table td {
-      border: 1px solid #000;
-      padding: 6px 12px;
+      border: .75pt solid #000;
+      padding: 1.2mm 1.8mm;
+      line-height: 1.08;
     }
     table.data-table th {
       background: #f5f5f5;
       text-align: center;
       font-weight: bold;
     }
+    table.data-table thead { display: table-header-group; }
+    table.data-table tr { page-break-inside: avoid; }
     .signature-container {
-      margin-top: 50px;
+      margin-top: 12mm;
       float: right;
-      width: 320px;
+      width: 85mm;
       text-align: center;
       page-break-inside: avoid;
     }
     .sign-line {
-      margin-top: 50px;
+      margin-top: 12mm;
       display: inline-block;
-      width: 200px;
-      border-bottom: 1px dotted #000;
+      width: 55mm;
+      border-bottom: .75pt dotted #000;
     }
     .no-print-bar {
       background: #f1f5f9;
@@ -1595,22 +1637,25 @@ function printThankYouDocument(t) {
       border-radius: 6px;
       cursor: pointer;
     }
+    .print-btn:disabled { opacity: .55; cursor: wait; }
+    @media screen {
+      body { width: 210mm; margin: 12mm auto; padding: 25mm 20mm 20mm 25mm; box-shadow: 0 12px 36px rgba(15,23,42,.18); }
+      .no-print-bar { margin: -25mm -20mm 10mm -25mm; }
+    }
     @media print {
       .no-print-bar { display: none !important; }
-      body { padding: 0 !important; }
+      html, body { background: #fff !important; }
+      body { width: auto; min-height: 0; padding: 0 !important; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
     }
   </style>
 </head>
 <body>
   <div class="no-print-bar">
-    <button class="print-btn" onclick="window.print()">🏅 พิมพ์หนังสือขอบคุณ (Print)</button>
+    <button class="print-btn" id="print-document-btn" data-ready-label="พิมพ์ / บันทึกเป็น PDF" disabled>กำลังเตรียมฟอนต์ TH Sarabun New...</button>
   </div>
 
   <div class="gov-letter-header">
-    <svg class="garuda" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-      <path d="M12 2L4 6v6c0 5.5 3.8 10.7 8 12 4.2-1.3 8-6.5 8-12V6l-8-4z"/>
-      <path d="M9 12l2 2 4-4"/>
-    </svg>
+    <img class="garuda" src="${window.location.origin}/garuda.svg" alt="ตราครุฑ">
   </div>
 
   <table class="gov-letter-head-table">
@@ -1668,6 +1713,7 @@ function printThankYouDocument(t) {
   printWindow.document.open();
   printWindow.document.write(html);
   printWindow.document.close();
+  prepareOfficialPrintWindow(printWindow);
 }
 
 function openBillPreviewModal(att, refNo) {

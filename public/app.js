@@ -97,6 +97,64 @@ function esc(value = '') { return String(value ?? '').replace(/[&<>'"]/g, c => (
 function fdate(value) { return value ? dateFmt.format(new Date(`${value}T00:00:00`)) : 'ไม่ระบุ'; }
 function today() { return new Date().toISOString().slice(0, 10); }
 
+function formatPhone(input) {
+  if (!input) return '';
+  const str = String(input).trim();
+  if (!str) return '';
+
+  const extMatch = str.match(/[\s,;]*(?:ต่อ|ext\.?|#)\s*(\d+)/i);
+  const ext = extMatch ? ` ต่อ ${extMatch[1]}` : '';
+  const mainPart = extMatch ? str.slice(0, extMatch.index) : str;
+
+  let cleaned = mainPart.replace(/[^\d+]/g, '');
+  if (cleaned.startsWith('+66')) {
+    cleaned = '0' + cleaned.slice(3);
+  } else if (cleaned.startsWith('66') && cleaned.length >= 10) {
+    cleaned = '0' + cleaned.slice(2);
+  }
+
+  const digits = cleaned.replace(/\D/g, '');
+  if (!digits) return str;
+
+  // 10-digit mobile (06x, 08x, 09x or general)
+  if (digits.length === 10) {
+    if (digits.startsWith('02')) {
+      return `${digits.slice(0, 2)}-${digits.slice(2, 6)}-${digits.slice(6)}${ext}`;
+    }
+    return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}${ext}`;
+  }
+
+  // 9-digit landline (02 Bangkok or 03x, 04x, 05x, 07x provincial)
+  if (digits.length === 9) {
+    if (digits.startsWith('02')) {
+      return `${digits.slice(0, 2)}-${digits.slice(2, 5)}-${digits.slice(5)}${ext}`;
+    }
+    return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}${ext}`;
+  }
+
+  // 4-digit shortcode
+  if (digits.length === 4) {
+    return `${digits}${ext}`;
+  }
+
+  // Dynamic formatting while typing
+  if (digits.startsWith('02')) {
+    if (digits.length <= 2) return `${digits}${ext}`;
+    if (digits.length <= 5) return `${digits.slice(0, 2)}-${digits.slice(2)}${ext}`;
+    return `${digits.slice(0, 2)}-${digits.slice(2, 5)}-${digits.slice(5, 9)}${ext}`;
+  }
+
+  if (digits.startsWith('0')) {
+    if (digits.length <= 3) return `${digits}${ext}`;
+    if (digits.length <= 6) return `${digits.slice(0, 3)}-${digits.slice(3)}${ext}`;
+    return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6, 10)}${ext}`;
+  }
+
+  if (digits.length <= 3) return `${digits}${ext}`;
+  if (digits.length <= 6) return `${digits.slice(0, 3)}-${digits.slice(3)}${ext}`;
+  return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6, 10)}${ext}`;
+}
+
 function toast(message, type = 'success') {
   const el = document.createElement('div');
   el.className = `toast ${type}`;
@@ -1093,7 +1151,7 @@ async function openFacilitiesModal(type, onChanged) {
       ? state.facilities.map(f => {
           const fname = typeof f === 'string' ? f : (f.name || '');
           const faddr = typeof f === 'object' ? (f.address || '') : '';
-          const fphone = typeof f === 'object' ? (f.phone || '') : '';
+          const fphone = typeof f === 'object' ? formatPhone(f.phone || '') : '';
           return `
             <div class="fac-item-card">
               <div class="fac-item-info">
@@ -1127,7 +1185,7 @@ async function openFacilitiesModal(type, onChanged) {
               </div>
               <div>
                 <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">หมายเลขโทรศัพท์</label>
-                <input class="control" id="new-facility-phone" placeholder="เช่น 045-123456, 081-2345678">
+                <input class="control" id="new-facility-phone" type="tel" placeholder="เช่น 045-123-456, 081-234-5678, 098-765-4321" maxlength="20">
               </div>
             </div>
             <div style="text-align:right;">
@@ -1147,6 +1205,16 @@ async function openFacilitiesModal(type, onChanged) {
     </div>`;
 
   openModal(html, modal => {
+    const phoneInput = $('#new-facility-phone', modal);
+    if (phoneInput) {
+      phoneInput.addEventListener('input', e => {
+        const formatted = formatPhone(e.target.value);
+        if (e.target.value !== formatted) {
+          e.target.value = formatted;
+        }
+      });
+    }
+
     const bindEvents = () => {
       $$('.btn-del-facility', modal).forEach(btn => {
         btn.addEventListener('click', async () => {
@@ -1180,10 +1248,9 @@ async function openFacilitiesModal(type, onChanged) {
       e.preventDefault();
       const nameInput = $('#new-facility-name', modal);
       const addrInput = $('#new-facility-address', modal);
-      const phoneInput = $('#new-facility-phone', modal);
       const name = nameInput.value.trim();
       const address = addrInput.value.trim();
-      const phone = phoneInput.value.trim();
+      const phone = formatPhone(phoneInput.value.trim());
       if (!name) return;
       try {
         const res = await api('/api/facilities', {
@@ -1931,12 +1998,12 @@ async function openGoodsReceiptPromptModal(t) {
               </div>
               <div class="fac-summary-detail">
                 <div><strong>ที่อยู่:</strong> <span id="prompt-fac-address">${esc(facInfo.address || '— (ยังไม่ได้ระบุที่อยู่)')}</span></div>
-                <div><strong>หมายเลขโทรศัพท์:</strong> <span id="prompt-fac-phone">${esc(facInfo.phone || '— (ยังไม่ได้ระบุเบอร์โทร)')}</span></div>
+                <div><strong>หมายเลขโทรศัพท์:</strong> <span id="prompt-fac-phone">${esc(formatPhone(facInfo.phone) || '— (ยังไม่ได้ระบุเบอร์โทร)')}</span></div>
               </div>
             </div>
             <input type="hidden" name="donorName" id="hidden-donor-name" value="${esc(facInfo.name)}">
             <input type="hidden" name="donorAddress" id="hidden-donor-address" value="${esc(facInfo.address)}">
-            <input type="hidden" name="donorPhone" id="hidden-donor-phone" value="${esc(facInfo.phone)}">
+            <input type="hidden" name="donorPhone" id="hidden-donor-phone" value="${esc(formatPhone(facInfo.phone))}">
 
             <div class="signatories-box">
               <div class="signatories-head">
@@ -2031,10 +2098,10 @@ async function openGoodsReceiptPromptModal(t) {
         const hidPhone = $('#hidden-donor-phone', modal);
         if (nameEl) nameEl.textContent = facInfo.name;
         if (addrEl) addrEl.textContent = facInfo.address || '— (ยังไม่ได้ระบุที่อยู่)';
-        if (phoneEl) phoneEl.textContent = facInfo.phone || '— (ยังไม่ได้ระบุเบอร์โทร)';
+        if (phoneEl) phoneEl.textContent = formatPhone(facInfo.phone) || '— (ยังไม่ได้ระบุเบอร์โทร)';
         if (hidName) hidName.value = facInfo.name;
         if (hidAddr) hidAddr.value = facInfo.address;
-        if (hidPhone) hidPhone.value = facInfo.phone;
+        if (hidPhone) hidPhone.value = formatPhone(facInfo.phone);
       });
     });
 
@@ -2291,7 +2358,7 @@ function printGoodsReceiptDocument(t, meta = {}) {
   <div class="donor-info-block">
     <div class="donor-info-row"><span class="donor-label">ชื่อผู้สนับสนุน/บริจาค</span> ${toThaiNum(esc(meta.donorName || t.facility || ''))}</div>
     <div class="donor-info-row"><span class="donor-label">ที่อยู่ที่สามารถติดต่อได้</span> ${toThaiNum(esc(meta.donorAddress || '—'))}</div>
-    <div class="donor-info-row"><span class="donor-label">หมายเลขโทรศัพท์</span> ${toThaiNum(esc(meta.donorPhone || '—'))}</div>
+    <div class="donor-info-row"><span class="donor-label">หมายเลขโทรศัพท์</span> ${toThaiNum(esc(formatPhone(meta.donorPhone) || '—'))}</div>
   </div>
 
   <table class="data-table">

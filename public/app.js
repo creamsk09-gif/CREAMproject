@@ -202,28 +202,48 @@ function debounce(fn, wait = 300) {
   };
 }
 
-/* ── Accessible Modal Manager with Keyboard Trap & Escape ── */
-let lastFocusedElement = null;
+/* ── Accessible Modal Manager with Multi-Modal Stacking & Keyboard Trap ── */
+const modalStack = [];
 
 function openModal(html, setupFn) {
-  lastFocusedElement = document.activeElement;
   const root = $('#modal-root');
-  root.innerHTML = html;
+  const temp = document.createElement('div');
+  temp.innerHTML = html.trim();
+  const backdrop = temp.firstElementChild;
+  if (!backdrop) return;
 
-  const backdrop = $('.modal-backdrop', root);
-  const modal = $('.modal', root) || $('.confirm-dialog', root);
+  const prevActive = document.activeElement;
+  const zIndex = 80 + modalStack.length * 10;
+  backdrop.style.zIndex = zIndex;
+
+  root.appendChild(backdrop);
+
+  const modal = $('.modal', backdrop) || $('.confirm-dialog', backdrop);
   
-  // Close handlers
-  $$('[data-close]', root).forEach(b => b.addEventListener('click', closeModal));
-  if (backdrop) backdrop.addEventListener('click', e => { if (e.target === e.currentTarget) closeModal(); });
+  const closeThisModal = () => {
+    const idx = modalStack.findIndex(m => m.backdrop === backdrop);
+    if (idx !== -1) {
+      const item = modalStack.splice(idx, 1)[0];
+      if (item.keyHandler) document.removeEventListener('keydown', item.keyHandler);
+      backdrop.remove();
+      if (item.prevActive && typeof item.prevActive.focus === 'function') {
+        try { item.prevActive.focus(); } catch (_) {}
+      }
+    }
+  };
 
-  // Escape key handler
+  // Close handlers
+  $$('[data-close]', backdrop).forEach(b => b.addEventListener('click', closeThisModal));
+  backdrop.addEventListener('click', e => { if (e.target === backdrop) closeThisModal(); });
+
+  // Escape & Tab key handler
   const keyHandler = e => {
+    if (modalStack.length > 0 && modalStack[modalStack.length - 1].backdrop !== backdrop) return;
+
     if (e.key === 'Escape') {
       e.preventDefault();
-      closeModal();
+      closeThisModal();
     } else if (e.key === 'Tab') {
-      // Focus trap inside modal
       const focusables = modal ? modal.querySelectorAll('button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])') : [];
       if (!focusables.length) return;
       const first = focusables[0];
@@ -238,7 +258,8 @@ function openModal(html, setupFn) {
     }
   };
   document.addEventListener('keydown', keyHandler);
-  root._keyHandler = keyHandler;
+
+  modalStack.push({ backdrop, modal, keyHandler, prevActive, closeFn: closeThisModal });
 
   if (setupFn) setupFn(modal);
   
@@ -248,15 +269,9 @@ function openModal(html, setupFn) {
 }
 
 function closeModal() {
-  const root = $('#modal-root');
-  if (root._keyHandler) {
-    document.removeEventListener('keydown', root._keyHandler);
-    delete root._keyHandler;
-  }
-  root.innerHTML = '';
-  if (lastFocusedElement) {
-    lastFocusedElement.focus();
-    lastFocusedElement = null;
+  if (modalStack.length > 0) {
+    const top = modalStack[modalStack.length - 1];
+    top.closeFn();
   }
 }
 
@@ -1103,7 +1118,7 @@ async function transactionPage(type) {
     toast('ลบไฟล์แนบเรียบร้อย');
   });
 
-  $('#manage-facilities-btn').addEventListener('click', () => openFacilitiesModal(type));
+  $('#manage-facilities-btn').addEventListener('click', () => openFacilitiesModal(type, null, $('#tx-facility')?.value || ''));
   $('#manage-items-btn').addEventListener('click', () => {
     openItemModal(newItem => {
       const lineItem = $('#line-item');
@@ -1138,7 +1153,7 @@ async function loadTxPage(type, page) {
   }
 }
 
-async function openFacilitiesModal(type, onChanged) {
+async function openFacilitiesModal(type, onChanged, initialFacilityName = '') {
   try {
     const d = await api('/api/facilities');
     state.facilities = d.facilities;
@@ -1153,16 +1168,27 @@ async function openFacilitiesModal(type, onChanged) {
           const faddr = typeof f === 'object' ? (f.address || '') : '';
           const fphone = typeof f === 'object' ? formatPhone(f.phone || '') : '';
           return `
-            <div class="fac-item-card">
+            <div class="fac-item-card" data-fac-name="${esc(fname)}" style="cursor:pointer;" title="คลิกเพื่อดึงข้อมูลมาแก้ไข">
               <div class="fac-item-info">
                 <strong>${esc(fname)}</strong>
-                ${(faddr || fphone) ? `<div class="fac-meta-line">${faddr ? `📍 ${esc(faddr)} ` : ''}${fphone ? `📞 โทร. ${esc(fphone)}` : ''}</div>` : '<div class="fac-meta-line" style="color:var(--muted); font-style:italic;">ยังไม่ได้ระบุที่อยู่/เบอร์โทร</div>'}
+                ${(faddr || fphone) ? `<div class="fac-meta-line">${faddr ? `📍 ${esc(faddr)} ` : ''}${fphone ? `📞 โทร. ${esc(fphone)}` : ''}</div>` : '<div class="fac-meta-line" style="color:var(--muted); font-style:italic;">ยังไม่ได้ระบุที่อยู่/เบอร์โทร (คลิกเพื่อเพิ่มข้อมูล)</div>'}
               </div>
-              <button type="button" class="icon-button danger btn-del-facility" data-name="${esc(fname)}" aria-label="ลบ">${icon('trash')}</button>
+              <button type="button" class="icon-button danger btn-del-facility" data-name="${esc(fname)}" aria-label="ลบ" onclick="event.stopPropagation();">${icon('trash')}</button>
             </div>`;
         }).join('')
       : '<div class="empty-inline">ยังไม่มีรายชื่อหน่วยงาน</div>';
   }
+
+  // Find if initial facility name exists to pre-fill address and phone
+  const targetName = (initialFacilityName || '').trim();
+  const matchedExisting = targetName ? state.facilities.find(f => {
+    const fn = typeof f === 'string' ? f : (f.name || '');
+    return fn.toLowerCase() === targetName.toLowerCase();
+  }) : null;
+
+  const initName = targetName;
+  const initAddr = typeof matchedExisting === 'object' ? (matchedExisting?.address || '') : '';
+  const initPhone = typeof matchedExisting === 'object' ? formatPhone(matchedExisting?.phone || '') : '';
 
   const html = `
     <div class="modal-backdrop" role="presentation">
@@ -1176,16 +1202,16 @@ async function openFacilitiesModal(type, onChanged) {
           <form id="add-facility-form" class="fac-form-grid">
             <div>
               <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">ชื่อผู้ส่งมอบ / หน่วยงาน <b class="required">*</b></label>
-              <input class="control" id="new-facility-name" required placeholder="พิมพ์ชื่อผู้ส่งมอบ / หน่วยงานใหม่..." minlength="2" maxlength="120">
+              <input class="control" id="new-facility-name" required value="${esc(initName)}" placeholder="พิมพ์ชื่อผู้ส่งมอบ / หน่วยงานใหม่..." minlength="2" maxlength="120">
             </div>
             <div class="fac-form-row">
               <div>
                 <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">ที่อยู่ที่สามารถติดต่อได้</label>
-                <input class="control" id="new-facility-address" placeholder="เช่น 123 ถ.กสิกรรม ต.เมืองใต้ อ.เมือง จ.ศรีสะเกษ">
+                <input class="control" id="new-facility-address" value="${esc(initAddr)}" placeholder="เช่น 123 ถ.กสิกรรม ต.เมืองใต้ อ.เมือง จ.ศรีสะเกษ">
               </div>
               <div>
                 <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">หมายเลขโทรศัพท์</label>
-                <input class="control" id="new-facility-phone" type="tel" placeholder="เช่น 045-123-456, 081-234-5678, 098-765-4321" maxlength="20">
+                <input class="control" id="new-facility-phone" type="tel" value="${esc(initPhone)}" placeholder="เช่น 045-123-456, 081-234-5678, 098-765-4321" maxlength="20">
               </div>
             </div>
             <div style="text-align:right;">
@@ -1205,7 +1231,10 @@ async function openFacilitiesModal(type, onChanged) {
     </div>`;
 
   openModal(html, modal => {
+    const nameInput = $('#new-facility-name', modal);
+    const addrInput = $('#new-facility-address', modal);
     const phoneInput = $('#new-facility-phone', modal);
+
     if (phoneInput) {
       phoneInput.addEventListener('input', e => {
         const formatted = formatPhone(e.target.value);
@@ -1215,9 +1244,37 @@ async function openFacilitiesModal(type, onChanged) {
       });
     }
 
+    if (nameInput) {
+      nameInput.addEventListener('input', () => {
+        const typed = nameInput.value.trim();
+        const found = state.facilities.find(f => {
+          const fn = typeof f === 'string' ? f : (f.name || '');
+          return fn.toLowerCase() === typed.toLowerCase();
+        });
+        if (found && typeof found === 'object') {
+          if (found.address && !addrInput.value) addrInput.value = found.address;
+          if (found.phone && !phoneInput.value) phoneInput.value = formatPhone(found.phone);
+        }
+      });
+    }
+
     const bindEvents = () => {
+      $$('.fac-item-card', modal).forEach(card => {
+        card.addEventListener('click', () => {
+          const clickedName = card.dataset.facName;
+          const fac = state.facilities.find(f => (typeof f === 'string' ? f : (f.name || '')) === clickedName);
+          if (fac) {
+            nameInput.value = typeof fac === 'string' ? fac : (fac.name || '');
+            addrInput.value = typeof fac === 'object' ? (fac.address || '') : '';
+            phoneInput.value = typeof fac === 'object' ? formatPhone(fac.phone || '') : '';
+            nameInput.focus();
+          }
+        });
+      });
+
       $$('.btn-del-facility', modal).forEach(btn => {
-        btn.addEventListener('click', async () => {
+        btn.addEventListener('click', async e => {
+          e.stopPropagation();
           const fname = btn.dataset.name;
           const ok = await confirmModal({
             title: 'ยืนยันการลบรายชื่อ',
@@ -1246,8 +1303,6 @@ async function openFacilitiesModal(type, onChanged) {
 
     $('#add-facility-form', modal).addEventListener('submit', async e => {
       e.preventDefault();
-      const nameInput = $('#new-facility-name', modal);
-      const addrInput = $('#new-facility-address', modal);
       const name = nameInput.value.trim();
       const address = addrInput.value.trim();
       const phone = formatPhone(phoneInput.value.trim());
@@ -1258,15 +1313,12 @@ async function openFacilitiesModal(type, onChanged) {
           body: JSON.stringify({ name, address, phone })
         });
         state.facilities = res.facilities;
-        nameInput.value = '';
-        addrInput.value = '';
-        phoneInput.value = '';
         $('#facilities-manage-list', modal).innerHTML = renderList();
         $('#fac-count', modal).textContent = state.facilities.length;
         updateTransactionFacilitiesDatalist(name);
-        if (onChanged) onChanged(state.facilities);
+        if (onChanged) onChanged(state.facilities, { name, address, phone });
         toast(`บันทึกข้อมูล "${name}" เรียบร้อย`);
-        bindEvents();
+        closeModal();
       } catch (ex) {
         $('#facility-manage-error', modal).textContent = ex.message;
       }
@@ -1398,7 +1450,7 @@ function transactionCard(t, type) {
       <p>${esc(t.facility)}</p>
       <div class="bottom" style="margin-top: 12px; display: flex; justify-content: space-between; align-items: flex-end;">
         <div>
-          <span style="display:block; margin-bottom:4px; font-size:12px; font-weight:500; color: ${t.memoDone ? 'var(--primary)' : 'var(--orange)'};">
+          <span class="card-memo-status" style="display:block; margin-bottom:4px; font-size:12px; font-weight:500; color: ${t.memoDone ? 'var(--primary)' : 'var(--orange)'};">
             ${t.memoDone ? '● ทำบันทึกข้อความแล้ว' : '● รอทำบันทึกข้อความ'}
           </span>
           <span style="font-size:12px; color:var(--muted);">${fmt.format(t.lineCount)} รายการ · ${fmt.format(t.totalQty)} หน่วยรวม</span>
@@ -1429,34 +1481,356 @@ function officialDocumentFontCss() {
   `;
 }
 
-function prepareOfficialPrintWindow(printWindow) {
-  const button = printWindow.document.getElementById('print-document-btn');
-  if (!button) return;
-  const ready = printWindow.document.fonts?.ready || Promise.resolve();
-  ready.finally(() => {
-    button.disabled = false;
-    button.textContent = button.dataset.readyLabel;
+function downloadWordDocx(doc, defaultFilename = 'document.docx') {
+  const bodyClone = doc.body.cloneNode(true);
+  const noPrint = bodyClone.querySelector('.no-print-bar');
+  if (noPrint) noPrint.remove();
+
+  const garudas = bodyClone.querySelectorAll('.garuda');
+  garudas.forEach(img => {
+    img.style.display = 'block';
+    img.style.margin = '0 auto 10px auto';
+    img.style.width = '70px';
+    img.style.height = 'auto';
   });
-  button.addEventListener('click', () => printWindow.print());
+
+  const contentHtml = bodyClone.innerHTML;
+  const wordHtml = `
+<html xmlns:o='urn:schemas-microsoft-com:office:office'
+      xmlns:w='urn:schemas-microsoft-com:office:word'
+      xmlns='http://www.w3.org/TR/REC-html40'>
+<head>
+  <meta charset='utf-8'>
+  <title>${esc(doc.title || 'เอกสารราชการ')}</title>
+  <!--[if gte mso 9]>
+  <xml>
+    <w:WordDocument>
+      <w:View>Print</w:View>
+      <w:Zoom>100</w:Zoom>
+      <w:DoNotOptimizeForBrowser/>
+    </w:WordDocument>
+  </xml>
+  <![endif]-->
+  <style>
+    @page Section1 {
+      size: 595.35pt 841.95pt; /* A4 */
+      margin: 1.0in 1.0in 1.0in 1.0in;
+      mso-header-margin: .5in;
+      mso-footer-margin: .5in;
+      mso-paper-source: 0;
+    }
+    div.Section1 { page: Section1; }
+    body {
+      font-family: 'TH Sarabun New', 'TH SarabunPSK', Sarabun, Tahoma, sans-serif;
+      font-size: 16pt;
+      line-height: 1.25;
+      color: #000;
+    }
+    h1, h2, h3, h4, p, div, span, td, th {
+      font-family: 'TH Sarabun New', 'TH SarabunPSK', Sarabun, Tahoma, sans-serif;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 8pt 0;
+      mso-table-lspace: 0pt;
+      mso-table-rspace: 0pt;
+    }
+    th, td {
+      font-size: 16pt;
+    }
+    .data-table th, .data-table td {
+      border: 1px solid #000;
+      padding: 4pt 6pt;
+    }
+    .data-table th {
+      background-color: #f8fafc;
+      font-weight: bold;
+      text-align: center;
+    }
+    .sign-table {
+      border: none !important;
+      margin-top: 18pt;
+    }
+    .sign-table td {
+      border: none !important;
+      padding: 4pt 8pt;
+      vertical-align: top;
+    }
+    .memo-table {
+      border: none !important;
+    }
+    .memo-table td {
+      border: none !important;
+      padding: 2pt 0;
+    }
+    .memo-title {
+      font-size: 28pt;
+      font-weight: bold;
+      text-align: center;
+      margin: 0 0 6pt 0;
+    }
+    .doc-main-title {
+      font-size: 22pt;
+      font-weight: bold;
+      text-align: center;
+      margin-bottom: 8pt;
+    }
+    .doc-gov-head {
+      text-align: right;
+      font-size: 16pt;
+      margin-bottom: 8pt;
+    }
+    .donor-info-block {
+      font-size: 16pt;
+      margin-bottom: 8pt;
+      line-height: 1.35;
+    }
+    .donor-info-row {
+      margin-bottom: 3pt;
+    }
+    .donor-label {
+      font-weight: bold;
+      display: inline-block;
+      width: 160pt;
+    }
+    .summary-wrap {
+      margin-top: 8pt;
+      font-size: 16pt;
+    }
+  </style>
+</head>
+<body>
+  <div class="Section1">
+    ${contentHtml}
+  </div>
+</body>
+</html>`;
+
+  const blob = new Blob(['\ufeff' + wordHtml], {
+    type: 'application/msword;charset=utf-8'
+  });
+
+  const cleanFilename = (defaultFilename || 'document.docx').replace(/[\\/:*?"<>|]/g, '_');
+  const finalFilename = cleanFilename.endsWith('.docx') || cleanFilename.endsWith('.doc') ? cleanFilename : `${cleanFilename}.docx`;
+
+  const url = URL.createObjectURL(blob);
+  const a = doc.createElement('a');
+  a.href = url;
+  a.download = finalFilename;
+  doc.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    a.remove();
+    URL.revokeObjectURL(url);
+  }, 1000);
 }
 
-function printMemoDocument(t) {
-  const isInbound = t.type === 'inbound';
-  const docTitle = isInbound ? 'รายงานการรับมอบยาและเวชภัณฑ์เข้าคลังกลาง' : 'ขออนุมัติเบิกจ่ายยาและเวชภัณฑ์ออกจากคลังกลาง';
+function prepareOfficialPrintWindow(printWindow, docFilename = 'document.docx') {
+  const printBtn = printWindow.document.getElementById('print-document-btn');
+  const docxBtn = printWindow.document.getElementById('download-docx-btn');
+
+  if (printBtn) {
+    const ready = printWindow.document.fonts?.ready || Promise.resolve();
+    ready.finally(() => {
+      printBtn.disabled = false;
+      printBtn.textContent = printBtn.dataset.readyLabel || 'พิมพ์ / บันทึกเป็น PDF';
+    });
+    printBtn.addEventListener('click', () => printWindow.print());
+  }
+
+  if (docxBtn) {
+    docxBtn.addEventListener('click', () => {
+      downloadWordDocx(printWindow.document, docFilename);
+    });
+  }
+}
+
+async function openInboundMemoPromptModal(t) {
+  let personnel = getSignatories();
+  const matchedDefault = personnel.find(p => p.name.includes('มัลลิกา'));
+  const defSigner = matchedDefault || { name: 'นางสาวมัลลิกา สุพล', position: 'หัวหน้ากลุ่มงานคุ้มครองผู้บริโภคและเภสัชสาธารณสุข' };
+
+  function renderDatalist() {
+    return `<datalist id="memo-personnel-names">${personnel.map(p => `<option value="${esc(p.name)}">${esc(p.position || '')}</option>`).join('')}</datalist>`;
+  }
+
+  const html = `
+    <div class="modal-backdrop" role="presentation">
+      <div class="modal" style="width:min(680px, 96vw);" role="dialog" aria-modal="true" aria-labelledby="memo-prompt-title">
+        <div class="modal-head">
+          <h2 id="memo-prompt-title">${icon('fileText')} จัดทำบันทึกข้อความ (รายการรับเข้า)</h2>
+          <button class="icon-button" type="button" data-close aria-label="ปิด">${icon('close')}</button>
+        </div>
+        <form id="memo-prompt-form">
+          <div class="modal-body" style="display:grid;gap:14px;max-height:calc(85vh - 120px);overflow-y:auto;padding:18px 20px;">
+            <p style="font-size:13px;color:var(--muted);margin:0;">
+              ระบุหรือตรวจสอบข้อมูลสำหรับจัดทำบันทึกข้อความราชการ ระบบจะจัดรูปแบบ A4 สารบรรณถูกต้องสวยงามอัตโนมัติ
+            </p>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+              <label class="field compact">
+                <span style="font-weight:600;">เลขที่หนังสือ / บันทึก</span>
+                <div style="display:flex;align-items:center;gap:6px;">
+                  <span style="font-size:13px;color:var(--muted);white-space:nowrap;">ศก ๐๐๓๓.๐๐๔ /</span>
+                  <input class="control" name="memoNo" value="" placeholder="เช่น ๑๒ (หรือเว้นว่างได้)">
+                </div>
+              </label>
+              <label class="field compact">
+                <span style="font-weight:600;">วันที่ในบันทึกข้อความ</span>
+                <input class="control" type="date" name="memoDate" value="${t.date ? t.date.slice(0, 10) : today()}" required>
+              </label>
+            </div>
+
+            <label class="field compact">
+              <span style="font-weight:600;">เรื่อง <b class="required">*</b></span>
+              <input class="control" name="subject" value="รายงานการรับมอบยาและเวชภัณฑ์เข้าคลังกลาง" required>
+            </label>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+              <label class="field compact">
+                <span style="font-weight:600;">ชื่อสิ่งของ / ประเภทเวชภัณฑ์</span>
+                <input class="control" name="itemName" value="ยาและเวชภัณฑ์" placeholder="เช่น ยาและเวชภัณฑ์" required>
+              </label>
+              <label class="field compact">
+                <span style="font-weight:600;">ผู้ส่งมอบ / แหล่งที่มา</span>
+                <input class="control" name="donorName" value="${esc(t.facility || '')}" placeholder="เช่น NCD ทหาร / โรงพยาบาล / มูลนิธิ" required>
+              </label>
+            </div>
+
+            <label class="field compact">
+              <span style="font-weight:600;">เหตุผลในการมอบสิ่งของ</span>
+              <textarea class="control" name="reason" rows="2" style="resize:vertical;font-size:13px;" required>เพื่อนำไปใช้ประโยชน์ในภารกิจการดูแลสุขภาพและรักษาพยาบาลประชาชนในพื้นที่จังหวัดศรีสะเกษ</textarea>
+            </label>
+
+            <div style="border-top:1px solid var(--line);padding-top:12px;margin-top:2px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <span style="font-size:13px;font-weight:700;color:var(--heading);">ข้อมูลผู้ลงนามบันทึกข้อความ</span>
+                <button type="button" class="button secondary small" id="btn-manage-sign-memo" style="border-radius:999px;padding:4px 12px;font-size:12px;display:inline-flex;align-items:center;gap:6px;">${icon('gear')} จัดการรายชื่อ</button>
+              </div>
+
+              <div id="memo-datalist-container">${renderDatalist()}</div>
+
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                <label class="field compact">
+                  <span>ชื่อผู้ลงนาม</span>
+                  <input class="control" id="memo-signer-name" name="signerName" list="memo-personnel-names" value="${esc(defSigner.name || '')}" placeholder="เลือกหรือพิมพ์ชื่อ...">
+                </label>
+                <label class="field compact">
+                  <span>ตำแหน่งผู้ลงนาม</span>
+                  <input class="control" id="memo-signer-pos" name="signerPos" value="${esc(defSigner.position || '')}" placeholder="ตำแหน่ง...">
+                </label>
+              </div>
+            </div>
+          </div>
+          <div class="modal-foot">
+            <button class="button secondary" type="button" data-close>ยกเลิก</button>
+            <button class="button primary" type="submit">${icon('printer')} พิมพ์ / จัดทำบันทึกข้อความ</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+
+  openModal(html, modal => {
+    const nameInp = $('#memo-signer-name', modal);
+    const posInp = $('#memo-signer-pos', modal);
+
+    const setupAutofill = () => {
+      nameInp?.addEventListener('input', () => {
+        const match = personnel.find(p => p.name === nameInp.value.trim());
+        if (match && posInp) posInp.value = match.position || '';
+      });
+    };
+    setupAutofill();
+
+    $('#btn-manage-sign-memo', modal)?.addEventListener('click', () => {
+      openManageSignatoriesModal(updatedList => {
+        personnel = updatedList;
+        const dl = $('#memo-datalist-container', modal);
+        if (dl) dl.innerHTML = renderDatalist();
+        setupAutofill();
+      });
+    });
+
+    $('#memo-prompt-form', modal)?.addEventListener('submit', e => {
+      e.preventDefault();
+      const fd = new FormData(e.currentTarget);
+      const signerName = (fd.get('signerName') || '').trim();
+      const matchedP = personnel.find(p => p.name === signerName);
+      const meta = {
+        memoNo: (fd.get('memoNo') || '').trim(),
+        memoDate: fd.get('memoDate') || t.date,
+        subject: fd.get('subject') || 'รายงานการรับมอบยาและเวชภัณฑ์เข้าคลังกลาง',
+        itemName: fd.get('itemName') || 'ยาและเวชภัณฑ์',
+        donorName: fd.get('donorName') || t.facility,
+        reason: fd.get('reason') || '',
+        signerName: signerName,
+        signerPos: fd.get('signerPos') || '',
+        signerNote: matchedP?.note || ''
+      };
+      if (!t.memoDone) {
+        api(`/api/transactions/${t.id}/memo`, {
+          method: 'POST',
+          body: JSON.stringify({ memoDone: true })
+        }).then(() => {
+          t.memoDone = true;
+          const memoChk = document.getElementById('memo-status-chk');
+          const memoBadge = document.getElementById('memo-status-badge');
+          if (memoChk) memoChk.checked = true;
+          if (memoBadge) {
+            memoBadge.className = 'doc-memo-badge done';
+            memoBadge.innerHTML = `${icon('check')} ทำบันทึกข้อความแล้ว (สำเร็จ)`;
+          }
+          const cardEl = document.querySelector(`.transaction-card[data-id="${t.id}"]`);
+          if (cardEl) {
+            const memoSpan = cardEl.querySelector('.card-memo-status');
+            if (memoSpan) {
+              memoSpan.style.color = 'var(--primary)';
+              memoSpan.textContent = '● ทำบันทึกข้อความแล้ว';
+            }
+          }
+        }).catch(() => {});
+      }
+      closeModal();
+      printMemoDocument(t, meta);
+    });
+  });
+}
+
+function printMemoDocument(t, meta) {
+  if (!meta) {
+    meta = {
+      memoNo: t.refNo || '',
+      memoDate: t.date || today(),
+      subject: 'รายงานการรับมอบยาและเวชภัณฑ์เข้าคลังกลาง',
+      itemName: 'ยาและเวชภัณฑ์',
+      donorName: t.facility || '',
+      reason: 'เพื่อนำไปใช้ประโยชน์ในภารกิจการดูแลสุขภาพและรักษาพยาบาลประชาชนในพื้นที่จังหวัดศรีสะเกษ',
+      signerName: '',
+      signerPos: '',
+      signerNote: ''
+    };
+  }
+
   const printWindow = window.open('', '_blank');
   if (!printWindow) {
     alert('กรุณาอนุญาตป๊อปอัป (Popup) เพื่อพิมพ์เอกสาร');
     return;
   }
 
+  const d = new Date(meta.memoDate || t.date || today());
+  const thMonths = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+  const day = d.getDate();
+  const month = thMonths[d.getMonth()];
+  const year = d.getFullYear() + 543;
+  const thaiDateFormatted = `${toThaiNum(day)} ${month} ${toThaiNum(year)}`;
+
   const itemsRows = t.items.map((line, idx) => `
     <tr>
-      <td style="text-align:center;">${idx + 1}</td>
-      <td><strong>${esc(line.item?.name || line.itemId)}</strong><br><small style="color:#555;">รหัส: ${esc(line.item?.code || '-')}</small></td>
-      <td style="text-align:center;">${esc(line.lot || '-')}</td>
-      <td style="text-align:center;">${fdate(line.expiry)}</td>
-      <td style="text-align:right;"><strong>${fmt.format(line.qty)}</strong></td>
-      <td style="text-align:center;">${esc(line.item?.unit || 'หน่วย')}</td>
+      <td style="text-align:center; width: 60px;">${toThaiNum(idx + 1)}.</td>
+      <td style="text-align:left; padding: 2mm 3.5mm;">${esc(toThaiNum(line.item?.name || line.itemId))}</td>
+      <td style="text-align:center; width: 130px;">${toThaiNum(fmt.format(line.qty))}</td>
+      <td style="text-align:center; width: 110px;">${esc(toThaiNum(line.item?.unit || 'หน่วย'))}</td>
     </tr>
   `).join('');
 
@@ -1465,94 +1839,95 @@ function printMemoDocument(t) {
 <html lang="th">
 <head>
   <meta charset="UTF-8">
-  <title>บันทึกข้อความ - ${esc(t.refNo)}</title>
+  <title>บันทึกข้อความ - ${esc(toThaiNum(meta.memoNo))}</title>
   <style>
     ${officialDocumentFontCss()}
-    @page { size: A4 portrait; margin: 20mm 20mm 20mm 25mm; }
+    @page {
+      size: A4 portrait;
+      margin: 20mm 20mm 20mm 25mm;
+    }
     * { box-sizing: border-box; }
     html { background: #e5e7eb; }
     body {
-      font-family: 'TH Sarabun New', sans-serif;
+      font-family: 'TH Sarabun New', Sarabun, sans-serif;
       font-size: 16pt;
-      line-height: 1.18;
+      line-height: 1.22;
       color: #000;
       background: #fff;
       margin: 0;
-      min-height: 257mm;
     }
-    .memo-header {
-      display: flex;
-      align-items: center;
+    .page-container {
       position: relative;
-      margin-bottom: 8mm;
-      border-bottom: 1.5pt solid #000;
-      padding-bottom: 2mm;
+      min-height: 250mm;
     }
     .garuda {
-      width: 15mm;
-      height: 15mm;
+      width: 18mm;
+      height: 18mm;
       object-fit: contain;
-      margin-right: 6mm;
+      display: block;
+      margin: 0 0 2mm 0;
     }
     .memo-title {
       font-size: 29pt;
       font-weight: 700;
-      letter-spacing: .5pt;
+      text-align: center;
+      margin: -14mm 0 6mm 0;
       line-height: 1;
-      margin: 0;
     }
     .meta-table {
       width: 100%;
-      margin-bottom: 4mm;
+      margin-bottom: 3mm;
       border-collapse: collapse;
       font-size: 16pt;
+      border: none !important;
     }
     .meta-table td {
+      border: none !important;
       padding: 1mm 0;
       vertical-align: top;
     }
     .body-p {
       text-indent: 2.5cm;
-      margin: 3mm 0;
+      margin: 3.5mm 0;
       text-align: justify;
-      orphans: 3;
-      widows: 3;
+      line-height: 1.25;
+    }
+    .signature-section {
+      margin-top: 25mm;
+      margin-left: 45%;
+      text-align: center;
+      page-break-inside: avoid;
+      line-height: 1.25;
+    }
+    .page-break {
+      page-break-before: always;
+      break-before: page;
+      margin-top: 20mm;
+      border-top: 1px dashed #cbd5e1;
+    }
+    .attachment-title {
+      font-size: 16pt;
+      font-weight: 700;
+      text-align: center;
+      margin-bottom: 6mm;
+      padding-top: 5mm;
+      line-height: 1.3;
     }
     table.data-table {
       width: 100%;
       border-collapse: collapse;
       margin: 4mm 0;
       font-size: 16pt;
-      page-break-inside: auto;
     }
     table.data-table th, table.data-table td {
-      border: .75pt solid #000;
-      padding: 1.2mm 1.8mm;
-      line-height: 1.08;
+      border: 1pt solid #000;
+      padding: 2.2mm 2mm;
+      line-height: 1.15;
     }
     table.data-table th {
-      background: #f5f5f5;
+      background: #fff;
       text-align: center;
       font-weight: bold;
-    }
-    table.data-table thead { display: table-header-group; }
-    table.data-table tr { page-break-inside: avoid; }
-    table.data-table small { font-size: 14pt; }
-    .signature-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10mm;
-      margin-top: 10mm;
-      page-break-inside: avoid;
-    }
-    .sign-box {
-      text-align: center;
-    }
-    .sign-line {
-      margin-top: 12mm;
-      display: inline-block;
-      width: 58mm;
-      border-bottom: .75pt dotted #000;
     }
     .no-print-bar {
       background: #f1f5f9;
@@ -1571,85 +1946,97 @@ function printMemoDocument(t) {
       border-radius: 6px;
       cursor: pointer;
     }
+    .docx-btn {
+      background: #0f766e;
+      color: #fff;
+      border: none;
+      padding: 8px 20px;
+      font-size: 15px;
+      font-weight: bold;
+      border-radius: 6px;
+      cursor: pointer;
+      margin-left: 10px;
+    }
+    .docx-btn:hover { background: #0d5f58; }
     .print-btn:disabled { opacity: .55; cursor: wait; }
     @media screen {
       body { width: 210mm; margin: 12mm auto; padding: 20mm 20mm 20mm 25mm; box-shadow: 0 12px 36px rgba(15,23,42,.18); }
       .no-print-bar { margin: -20mm -20mm 10mm -25mm; }
+      .page-break { margin-left: -25mm; margin-right: -20mm; padding-left: 25mm; padding-right: 20mm; }
     }
     @media print {
       .no-print-bar { display: none !important; }
       html, body { background: #fff !important; }
       body { width: auto; min-height: 0; padding: 0 !important; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+      .page-break { border: none !important; margin: 0; padding: 0; }
     }
   </style>
 </head>
 <body>
   <div class="no-print-bar">
     <button class="print-btn" id="print-document-btn" data-ready-label="พิมพ์ / บันทึกเป็น PDF" disabled>กำลังเตรียมฟอนต์ TH Sarabun New...</button>
+    <button class="print-btn docx-btn" id="download-docx-btn" type="button">พิมพ์ / บันทึกเป็น DOCX</button>
   </div>
 
-  <div class="memo-header">
+  <!-- หน้า 1: บันทึกข้อความ -->
+  <div class="page-container">
     <img class="garuda" src="${window.location.origin}/garuda.svg" alt="ตราครุฑ">
-    <h1 class="memo-title">บันทึกข้อความ</h1>
+    <div class="memo-title">บันทึกข้อความ</div>
+
+    <table class="meta-table">
+      <tr>
+        <td colspan="2"><strong>ส่วนราชการ</strong> กลุ่มงานคุ้มครองผู้บริโภคและเภสัชสาธารณสุข สำนักงานสาธารณสุขจังหวัดศรีสะเกษ</td>
+      </tr>
+      <tr>
+        <td style="width: 50%;"><strong>ที่</strong> ศก ๐๐๓๓.๐๐๔/${meta.memoNo ? esc(toThaiNum(meta.memoNo)) : ''}</td>
+        <td style="text-align: left;"><strong>วันที่</strong> ${thaiDateFormatted}</td>
+      </tr>
+      <tr>
+        <td colspan="2"><strong>เรื่อง</strong> ${esc(toThaiNum(meta.subject))}</td>
+      </tr>
+    </table>
+
+    <p style="margin: 2mm 0 3.5mm 0;"><strong>เรียน</strong> นายแพทย์สาธารณสุขจังหวัดศรีสะเกษ</p>
+
+    <p class="body-p">
+      <strong>เรื่องเดิม</strong> ด้วยกลุ่มงานคุ้มครองผู้บริโภคและเภสัชสาธารณสุข สำนักงานสาธารณสุข จังหวัดศรีสะเกษ ได้รับ${esc(toThaiNum(meta.itemName))} จาก${esc(toThaiNum(meta.donorName))} ${esc(toThaiNum(meta.reason))}
+    </p>
+
+    <p class="body-p">
+      <strong>ข้อพิจารณา</strong> ในการนี้ กลุ่มงานคุ้มครองผู้บริโภคและเภสัชสาธารณสุข สำนักงานสาธารณสุขจังหวัดศรีสะเกษ ได้ดำเนินการรับ${esc(toThaiNum(meta.itemName))}ดังกล่าว เข้าคลังเวชภัณฑ์เรียบร้อยแล้ว เพื่อดำเนินการจัดสรรส่งมอบแก่ผู้ที่ได้รับผลกระทบต่อไป รายละเอียดตามรายการที่แนบเรียนมาพร้อมนี้
+    </p>
+
+    <p class="body-p">
+      <strong>ข้อเสนอ</strong> จึงเรียนมาเพื่อทราบ
+    </p>
+
+    <div class="signature-section">
+      <div>( ${esc(toThaiNum(meta.signerName ? meta.signerName : '...................................................'))} )</div>
+      <div style="margin-top: 1.5mm;">${esc(toThaiNum(meta.signerPos ? meta.signerPos : '...................................................'))}</div>
+      ${meta.signerNote ? `<div style="margin-top: 1.5mm; font-size: 14pt; color: #333;">${esc(toThaiNum(meta.signerNote))}</div>` : ''}
+    </div>
   </div>
 
-  <table class="meta-table">
-    <tr>
-      <td style="width: 55%;"><strong>ส่วนราชการ:</strong> สำนักงานสาธารณสุขจังหวัดศรีสะเกษ ฝ่ายเภสัชกรรม</td>
-      <td><strong>โทร:</strong> ๐ ๔๕๖๑ ๒๗๖๐</td>
-    </tr>
-    <tr>
-      <td><strong>ที่:</strong> สสจ.ศก. / ${esc(t.refNo)}</td>
-      <td><strong>วันที่:</strong> ${thaiFullDate(t.date)}</td>
-    </tr>
-    <tr>
-      <td colspan="2"><strong>เรื่อง:</strong> ${esc(docTitle)}</td>
-    </tr>
-  </table>
-
-  <p><strong>เรียน:</strong> นายแพทย์สาธารณสุขจังหวัดศรีสะเกษ</p>
-
-  <p class="body-p">
-    ตามที่ฝ่ายเภสัชกรรมและคุ้มครองผู้บริโภค สำนักงานสาธารณสุขจังหวัดศรีสะเกษ ได้ดำเนินการ${isInbound ? 'ตรวจรับมอบยาและเวชภัณฑ์จาก <strong>' + esc(t.facility) + '</strong> เข้าสู่คลังกลาง' : 'จัดเตรียมยาและเวชภัณฑ์เพื่อส่งมอบ/เบิกจ่ายให้แก่ <strong>' + esc(t.facility) + '</strong>'} ตามความประสงค์การบริหารจัดการคลังระดับจังหวัดนั้น
-  </p>
-
-  <p class="body-p">
-    บัดนี้ เจ้าหน้าที่คลังยาและเวชภัณฑ์ได้ทำการตรวจสอบความถูกต้องของรายการ ล็อต จำนวน และวันหมดอายุเรียบร้อยแล้ว จึงขอรายงานสรุปรายละเอียดดังตารางรายการต่อไปนี้:
-  </p>
-
-  <table class="data-table">
-    <thead>
-      <tr>
-        <th style="width: 40px;">ลำดับ</th>
-        <th>รายการยาและเวชภัณฑ์</th>
-        <th style="width: 100px;">ล็อต (Lot)</th>
-        <th style="width: 110px;">วันหมดอายุ</th>
-        <th style="width: 90px;">จำนวน</th>
-        <th style="width: 80px;">หน่วย</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${itemsRows}
-    </tbody>
-  </table>
-
-  <p class="body-p">
-    จึงเรียนมาเพื่อโปรดทราบและพิจารณา${isInbound ? 'ลงนามรับทราบผลการตรวจรับยาและเวชภัณฑ์ดังกล่าว' : 'อนุมัติการเบิกจ่ายยาและเวชภัณฑ์ต่อไป'}
-  </p>
-
-  <div class="signature-grid">
-    <div class="sign-box">
-      <p>ลงชื่อ <span class="sign-line"></span></p>
-      <p>(........................................................)</p>
-      <p>ตำแหน่ง เภสัชกรปฏิบัติการ / เจ้าหน้าที่ผู้รับผิดชอบ</p>
+  <!-- หน้า 2: รายการแนบ -->
+  <div class="page-break"></div>
+  <div class="page-container" style="padding-top: 10mm;">
+    <div class="attachment-title">
+      รายการ${esc(toThaiNum(meta.itemName))} ที่ได้รับสนับสนุนจาก${esc(toThaiNum(meta.donorName))}
     </div>
-    <div class="sign-box">
-      <p>คำสั่ง / ข้อสั่งการ</p>
-      <p>[ / ] ทราบ / อนุมัติ &nbsp;&nbsp;&nbsp; [ &nbsp; ] อื่นๆ ....................</p>
-      <p>ลงชื่อ <span class="sign-line"></span></p>
-      <p>(........................................................)</p>
-      <p>นายแพทย์สาธารณสุขจังหวัดศรีสะเกษ</p>
-    </div>
+
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th style="width: 60px;">ลำดับ</th>
+          <th>รายการ</th>
+          <th style="width: 130px;">จำนวน</th>
+          <th style="width: 110px;">หน่วย</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${itemsRows}
+      </tbody>
+    </table>
   </div>
 </body>
 </html>`;
@@ -1657,7 +2044,7 @@ function printMemoDocument(t) {
   printWindow.document.open();
   printWindow.document.write(html);
   printWindow.document.close();
-  prepareOfficialPrintWindow(printWindow);
+  prepareOfficialPrintWindow(printWindow, `บันทึกข้อความ_${meta.memoNo || t.refNo || 'memo'}.docx`);
 }
 
 function printThankYouDocument(t) {
@@ -1763,7 +2150,7 @@ function printThankYouDocument(t) {
       margin-bottom: 20px;
     }
     .print-btn {
-      background: #059669;
+      background: #2563eb;
       color: #fff;
       border: none;
       padding: 8px 20px;
@@ -1772,6 +2159,18 @@ function printThankYouDocument(t) {
       border-radius: 6px;
       cursor: pointer;
     }
+    .docx-btn {
+      background: #0f766e;
+      color: #fff;
+      border: none;
+      padding: 8px 20px;
+      font-size: 15px;
+      font-weight: bold;
+      border-radius: 6px;
+      cursor: pointer;
+      margin-left: 10px;
+    }
+    .docx-btn:hover { background: #0d5f58; }
     .print-btn:disabled { opacity: .55; cursor: wait; }
     @media screen {
       body { width: 210mm; margin: 12mm auto; padding: 25mm 20mm 20mm 25mm; box-shadow: 0 12px 36px rgba(15,23,42,.18); }
@@ -1787,6 +2186,7 @@ function printThankYouDocument(t) {
 <body>
   <div class="no-print-bar">
     <button class="print-btn" id="print-document-btn" data-ready-label="พิมพ์ / บันทึกเป็น PDF" disabled>กำลังเตรียมฟอนต์ TH Sarabun New...</button>
+    <button class="print-btn docx-btn" id="download-docx-btn" type="button">พิมพ์ / บันทึกเป็น DOCX</button>
   </div>
 
   <div class="gov-letter-header">
@@ -1848,26 +2248,26 @@ function printThankYouDocument(t) {
   printWindow.document.open();
   printWindow.document.write(html);
   printWindow.document.close();
-  prepareOfficialPrintWindow(printWindow);
+  prepareOfficialPrintWindow(printWindow, `หนังสือขอบคุณ_${t.refNo || 'letter'}.docx`);
 }
 
 function getSignatories() {
-  try {
-    const raw = localStorage.getItem('ssk_personnel_list');
-    if (raw) return JSON.parse(raw);
-  } catch (e) {}
-  return [
-    { id: '1', name: 'นายแพทย์ทนง วีระแสงพงษ์', position: 'นายแพทย์สาธารณสุขจังหวัดศรีสะเกษ' },
-    { id: '2', name: 'ภก.เด่นชัย ปัญญาดี', position: 'หัวหน้ากลุ่มงานเภสัชกรรมและคุ้มครองผู้บริโภค' },
-    { id: '3', name: 'ภญ.วิภาวดี มีสุข', position: 'เภสัชกรชำนาญการ' },
-    { id: '4', name: 'นายสมศักดิ์ คลังดี', position: 'เจ้าพนักงานพัสดุชำนาญงาน' },
-    { id: '5', name: 'นางสาวสุดารัตน์ ใจงาม', position: 'เจ้าหน้าที่คลังเวชภัณฑ์' }
+  const defaultList = [
+    { id: '1', name: 'นางสาวมัลลิกา สุพล', position: 'หัวหน้ากลุ่มงานคุ้มครองผู้บริโภคและเภสัชสาธารณสุข', note: '' }
   ];
+  try {
+    const raw = localStorage.getItem('ssk_personnel_list_v2');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length) return parsed;
+    }
+  } catch (e) {}
+  return defaultList;
 }
 
 function saveSignatories(list) {
   try {
-    localStorage.setItem('ssk_personnel_list', JSON.stringify(list));
+    localStorage.setItem('ssk_personnel_list_v2', JSON.stringify(list));
   } catch (e) {}
 }
 
@@ -1880,7 +2280,7 @@ function openManageSignatoriesModal(onChanged) {
       <div class="personnel-item">
         <div>
           <strong>${esc(p.name)}</strong>
-          <small>${esc(p.position || 'ไม่ระบุตำแหน่ง')}</small>
+          <small>${esc(p.position || 'ไม่ระบุตำแหน่ง')}${p.note ? ` · <span style="color:var(--primary);">${esc(p.note)}</span>` : ''}</small>
         </div>
         <button type="button" class="icon-button danger btn-del-person" data-index="${idx}" title="ลบรายชื่อ" aria-label="ลบรายชื่อ">${icon('close')}</button>
       </div>
@@ -1898,14 +2298,14 @@ function openManageSignatoriesModal(onChanged) {
 
   const html = `
     <div class="modal-backdrop" role="presentation">
-      <div class="modal" style="width:min(540px, 96vw);" role="dialog" aria-modal="true" aria-labelledby="manage-sign-title">
+      <div class="modal" style="width:min(580px, 96vw);" role="dialog" aria-modal="true" aria-labelledby="manage-sign-title">
         <div class="modal-head">
           <h2 id="manage-sign-title">${icon('gear')} จัดการรายชื่อผู้ลงนาม / บุคลากร</h2>
           <button class="icon-button" type="button" data-close aria-label="ปิด">${icon('close')}</button>
         </div>
         <div class="modal-body">
           <p style="font-size:12px;color:var(--muted);margin-bottom:14px;">เพิ่มหรือลบรายชื่อบุคลากรเพื่อใช้เลือกเป็นผู้ลงนามในเอกสารราชการต่างๆ</p>
-          <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;margin-bottom:14px;">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
             <label class="field compact" style="margin:0;">
               <span>ชื่อ-นามสกุล <b class="required">*</b></span>
               <input class="control" id="new-person-name" placeholder="เช่น ภก.สมชาย ใจดี">
@@ -1913,6 +2313,12 @@ function openManageSignatoriesModal(onChanged) {
             <label class="field compact" style="margin:0;">
               <span>ตำแหน่ง <b class="required">*</b></span>
               <input class="control" id="new-person-pos" placeholder="เช่น เภสัชกรชำนาญการ">
+            </label>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end;margin-bottom:14px;">
+            <label class="field compact" style="margin:0;">
+              <span>หมายเหตุ (เช่น ปฏิบัติราชการแทน/แทน)</span>
+              <input class="control" id="new-person-note" value="แทน หัวหน้ากลุ่มงานคุ้มครองผู้บริโภคและเภสัชสาธารณสุข" placeholder="เช่น แทน หัวหน้ากลุ่มงานคุ้มครองผู้บริโภคและเภสัชสาธารณสุข">
             </label>
             <button type="button" class="button primary small" id="btn-add-person" style="height:42px;">${icon('plus')} เพิ่ม</button>
           </div>
@@ -1928,14 +2334,17 @@ function openManageSignatoriesModal(onChanged) {
     renderList();
     const nameInp = $('#new-person-name', modal);
     const posInp = $('#new-person-pos', modal);
+    const noteInp = $('#new-person-note', modal);
     $('#btn-add-person', modal)?.addEventListener('click', () => {
       const name = nameInp.value.trim();
       const pos = posInp.value.trim();
+      const note = noteInp ? noteInp.value.trim() : '';
       if (!name) return toast('กรุณาระบุชื่อ-นามสกุล', 'error');
-      list.push({ id: 'p-' + Date.now(), name, position: pos });
+      list.push({ id: 'p-' + Date.now(), name, position: pos, note });
       saveSignatories(list);
       nameInp.value = '';
       posInp.value = '';
+      if (noteInp) noteInp.value = 'แทน หัวหน้ากลุ่มงานคุ้มครองผู้บริโภคและเภสัชสาธารณสุข';
       renderList();
       if (typeof onChanged === 'function') onChanged(list);
       toast(`เพิ่มรายชื่อ "${name}" เรียบร้อย`);
@@ -2088,8 +2497,16 @@ async function openGoodsReceiptPromptModal(t) {
     setupNamePosAutofill();
 
     $('#btn-manage-fac-prompt', modal)?.addEventListener('click', () => {
-      openFacilitiesModal(null, () => {
-        facInfo = getFacInfo();
+      openFacilitiesModal(null, (updatedFacilities, savedFac) => {
+        if (savedFac && savedFac.name) {
+          facInfo = {
+            name: savedFac.name,
+            address: savedFac.address || '',
+            phone: savedFac.phone || ''
+          };
+        } else {
+          facInfo = getFacInfo();
+        }
         const nameEl = $('#prompt-fac-name', modal);
         const addrEl = $('#prompt-fac-address', modal);
         const phoneEl = $('#prompt-fac-phone', modal);
@@ -2102,7 +2519,7 @@ async function openGoodsReceiptPromptModal(t) {
         if (hidName) hidName.value = facInfo.name;
         if (hidAddr) hidAddr.value = facInfo.address;
         if (hidPhone) hidPhone.value = formatPhone(facInfo.phone);
-      });
+      }, facInfo.name);
     });
 
     $('#btn-manage-sign-prompt', modal)?.addEventListener('click', () => {
@@ -2315,6 +2732,18 @@ function printGoodsReceiptDocument(t, meta = {}) {
       border-radius: 6px;
       cursor: pointer;
     }
+    .docx-btn {
+      background: #0f766e;
+      color: #fff;
+      border: none;
+      padding: 8px 24px;
+      font-size: 15px;
+      font-weight: bold;
+      border-radius: 6px;
+      cursor: pointer;
+      margin-left: 10px;
+    }
+    .docx-btn:hover { background: #0d5f58; }
     .print-btn:disabled { opacity: .55; cursor: wait; }
     @media screen {
       body {
@@ -2335,6 +2764,7 @@ function printGoodsReceiptDocument(t, meta = {}) {
 <body>
   <div class="no-print-bar">
     <button class="print-btn" id="print-document-btn" data-ready-label="พิมพ์ / บันทึกเป็น PDF" disabled>กำลังเตรียมฟอนต์ TH Sarabun New...</button>
+    <button class="print-btn docx-btn" id="download-docx-btn" type="button">พิมพ์ / บันทึกเป็น DOCX</button>
   </div>
 
   <div class="doc-main-title">${esc(docTitle)}</div>
@@ -2427,7 +2857,7 @@ function printGoodsReceiptDocument(t, meta = {}) {
   printWindow.document.open();
   printWindow.document.write(html);
   printWindow.document.close();
-  prepareOfficialPrintWindow(printWindow);
+  prepareOfficialPrintWindow(printWindow, `${docTitle}_${t.refNo || 'receipt'}.docx`);
 }
 
 function openBillPreviewModal(att, refNo) {
@@ -2578,6 +3008,14 @@ async function openTransactionDetail(txnId, pageType) {
                 ? `${icon('check')} ทำบันทึกข้อความแล้ว (สำเร็จ)`
                 : `${icon('clock')} ยังไม่ได้ทำบันทึกข้อความ`;
             }
+            const cardEl = document.querySelector(`.transaction-card[data-id="${txnId}"]`);
+            if (cardEl) {
+              const memoSpan = cardEl.querySelector('.card-memo-status');
+              if (memoSpan) {
+                memoSpan.style.color = isDone ? 'var(--primary)' : 'var(--orange)';
+                memoSpan.textContent = isDone ? '● ทำบันทึกข้อความแล้ว' : '● รอทำบันทึกข้อความ';
+              }
+            }
             toast(isDone ? 'บันทึกทำข้อความแล้ว (สำเร็จ)' : 'ยกเลิกสถานะทำบันทึกข้อความ');
           } catch (ex) {
             toast(ex.message, 'error');
@@ -2586,9 +3024,9 @@ async function openTransactionDetail(txnId, pageType) {
         });
       }
 
-      // Print Memo Button
+      // Print Memo Button (Opens Inbound Memo Prompt Modal)
       $('#print-memo-btn', modal)?.addEventListener('click', () => {
-        printMemoDocument(t);
+        openInboundMemoPromptModal(t);
       });
 
       // Print Thank You Button

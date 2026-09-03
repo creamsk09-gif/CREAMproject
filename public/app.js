@@ -992,8 +992,9 @@ async function transactionPage(type) {
       <div class="card-head">
         <div><h2>สรุปรายการ${inbound ? 'รับเข้า' : 'เบิกจ่าย'}ล่าสุด</h2><p>คลิกการ์ดเพื่อดูรายละเอียดหรือยกเลิกเอกสาร</p></div>
       </div>
-      <div class="transaction-list">
-        ${d.transactions.slice(0, 10).map(t => transactionCard(t, type)).join('') || '<div class="empty-inline">ยังไม่มีรายการ</div>'}
+      <div id="transaction-list-container">
+        <!-- populated dynamically -->
+        <div style="padding: 20px; text-align: center; color: var(--muted);">กำลังโหลดรายการ...</div>
       </div>
     </section>`;
 
@@ -1056,9 +1057,26 @@ async function transactionPage(type) {
     });
   });
 
-  $$('.transaction-card').forEach(card => {
-    card.addEventListener('click', () => openTransactionDetail(card.dataset.id, type));
-  });
+  loadTxPage(type, 1);
+}
+
+async function loadTxPage(type, page) {
+  const container = $('#transaction-list-container');
+  if (!container) return;
+  try {
+    const d = await api(`/api/transactions?type=${type}&limit=9&page=${page}`);
+    container.innerHTML = `
+      <div class="transaction-list">
+        ${d.transactions.length ? d.transactions.map(t => transactionCard(t, type)).join('') : '<div class="empty-inline">ยังไม่มีรายการ</div>'}
+      </div>
+      ${d.meta ? buildPagination(d.meta, p => loadTxPage(type, p)) : ''}
+    `;
+    $$('.transaction-card', container).forEach(card => {
+      card.addEventListener('click', () => openTransactionDetail(card.dataset.id, type));
+    });
+  } catch (err) {
+    container.innerHTML = '<div class="empty-inline">เกิดข้อผิดพลาดในการโหลดข้อมูล</div>';
+  }
 }
 
 async function openFacilitiesModal(type, onChanged) {
@@ -1310,9 +1328,14 @@ function transactionCard(t, type) {
         <span class="status ${isVoided ? 'expired' : 'normal'}">${statusLabel(t.status)}</span>
       </div>
       <p>${esc(t.facility)}</p>
-      <div class="bottom">
-        <span>${fmt.format(t.lineCount)} รายการ · ${fmt.format(t.totalQty)} หน่วยรวม</span>
-        <time>${fdate(t.date)}</time>
+      <div class="bottom" style="margin-top: 12px; display: flex; justify-content: space-between; align-items: flex-end;">
+        <div>
+          <span style="display:block; margin-bottom:4px; font-size:12px; font-weight:500; color: ${t.memoDone ? 'var(--primary)' : 'var(--orange)'};">
+            ${t.memoDone ? '● ทำบันทึกข้อความแล้ว' : '● รอทำบันทึกข้อความ'}
+          </span>
+          <span style="font-size:12px; color:var(--muted);">${fmt.format(t.lineCount)} รายการ · ${fmt.format(t.totalQty)} หน่วยรวม</span>
+        </div>
+        <time style="font-size:12px; color:var(--muted);">${fdate(t.date)}</time>
       </div>
     </article>`;
 }

@@ -1749,7 +1749,7 @@ async function openInboundMemoPromptModal(t) {
         const dl = $('#memo-datalist-container', modal);
         if (dl) dl.innerHTML = renderDatalist();
         setupAutofill();
-      });
+      }, { allowNote: true });
     });
 
     $('#memo-prompt-form', modal)?.addEventListener('submit', e => {
@@ -2031,6 +2031,482 @@ function printMemoDocument(t, meta) {
           <th>รายการ</th>
           <th style="width: 130px;">จำนวน</th>
           <th style="width: 110px;">หน่วย</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${itemsRows}
+      </tbody>
+    </table>
+  </div>
+</body>
+</html>`;
+
+  printWindow.document.open();
+  printWindow.document.write(html);
+  printWindow.document.close();
+  prepareOfficialPrintWindow(printWindow, `บันทึกข้อความ_${meta.memoNo || t.refNo || 'memo'}.docx`);
+}
+
+function getInboundDonorsForOutbound(t) {
+  if (!state.transactions || !Array.isArray(state.transactions)) return '';
+  const itemIds = new Set((t.items || []).map(i => i.itemId));
+  const donors = new Set();
+  for (const txn of state.transactions) {
+    if (txn.type === 'inbound' && txn.status !== 'void' && txn.facility) {
+      const hasItem = (txn.items || []).some(i => itemIds.has(i.itemId));
+      if (hasItem) {
+        donors.add(txn.facility.trim());
+      }
+    }
+  }
+  const donorList = Array.from(donors).filter(Boolean);
+  if (donorList.length > 0) {
+    return donorList.join(' และ ');
+  }
+  return '';
+}
+
+async function openOutboundMemoPromptModal(t) {
+  let personnel = getSignatories();
+  const matchedDefault = personnel.find(p => p.name.includes('มัลลิกา'));
+  const defSigner = matchedDefault || { name: 'นางสาวมัลลิกา สุพล', position: 'หัวหน้ากลุ่มงานคุ้มครองผู้บริโภคและเภสัชสาธารณสุข' };
+  const detectedDonors = getInboundDonorsForOutbound(t) || 'คลังเวชภัณฑ์ สำนักงานสาธารณสุขจังหวัดศรีสะเกษ';
+
+  function renderDatalist() {
+    return `<datalist id="memo-outbound-personnel-names">${personnel.map(p => `<option value="${esc(p.name)}">${esc(p.position || '')}</option>`).join('')}</datalist>`;
+  }
+
+  const items = t.items || [];
+  const itemsReqNoHtml = items.map((line, idx) => {
+    const itemName = line.item?.name || line.itemId || 'รายการ';
+    const qty = Number(line.qty) || 0;
+    const unit = line.item?.unit || 'หน่วย';
+    return `
+      <div class="memo-item-req-row" style="display:grid;grid-template-columns:2fr 1fr 1.5fr;gap:10px;align-items:center;padding:8px 10px;background:#fff;border-radius:6px;border:1px solid #e2e8f0;">
+        <div>
+          <strong style="font-size:13px;display:block;color:var(--heading);">${idx + 1}. ${esc(itemName)}</strong>
+          <small style="color:var(--muted);font-size:11px;">ล็อต: ${esc(line.lot || '-')} | หมดอายุ: ${line.expiry ? fdate(line.expiry) : '-'}</small>
+        </div>
+        <div style="font-size:13px;text-align:center;">
+          <span><strong>${fmt.format(qty)}</strong> ${esc(unit)}</span>
+        </div>
+        <div>
+          <input class="control memo-item-req-input" data-idx="${idx}" placeholder="เลขที่ใบเบิก (หรือเว้นว่าง)" style="font-size:13px;padding:6px 8px;">
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  const html = `
+    <div class="modal-backdrop" role="presentation">
+      <div class="modal" style="width:min(720px, 96vw);" role="dialog" aria-modal="true" aria-labelledby="memo-outbound-prompt-title">
+        <div class="modal-head">
+          <h2 id="memo-outbound-prompt-title">${icon('fileText')} จัดทำบันทึกข้อความ (รายการเบิกจ่าย)</h2>
+          <button class="icon-button" type="button" data-close aria-label="ปิด">${icon('close')}</button>
+        </div>
+        <form id="memo-outbound-prompt-form">
+          <div class="modal-body" style="display:grid;gap:14px;max-height:calc(85vh - 120px);overflow-y:auto;padding:18px 20px;">
+            <p style="font-size:13px;color:var(--muted);margin:0;">
+              ระบุหรือตรวจสอบข้อมูลสำหรับจัดทำบันทึกข้อความราชการ ระบบจะจัดรูปแบบ A4 สารบรรณถูกต้องสวยงามอัตโนมัติ
+            </p>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+              <label class="field compact">
+                <span style="font-weight:600;">เลขที่หนังสือ / บันทึก</span>
+                <div style="display:flex;align-items:center;gap:6px;">
+                  <span style="font-size:13px;color:var(--muted);white-space:nowrap;">ศก ๐๐๓๓.๐๐๔ /</span>
+                  <input class="control" name="memoNo" value="" placeholder="เช่น ๑๒ (หรือเว้นว่างได้)">
+                </div>
+              </label>
+              <label class="field compact">
+                <span style="font-weight:600;">วันที่ในบันทึกข้อความ</span>
+                <input class="control" type="date" name="memoDate" value="${t.date ? t.date.slice(0, 10) : today()}" required>
+              </label>
+            </div>
+
+            <label class="field compact">
+              <span style="font-weight:600;">เรื่อง <b class="required">*</b></span>
+              <input class="control" name="subject" value="รายงานการจัดสรรยาและเวชภัณฑ์" required>
+            </label>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+              <label class="field compact">
+                <span style="font-weight:600;">ชื่อสิ่งของ / ประเภทเวชภัณฑ์</span>
+                <input class="control" name="itemName" value="ยาและเวชภัณฑ์" placeholder="เช่น ยาและเวชภัณฑ์" required>
+              </label>
+              <label class="field compact">
+                <span style="font-weight:600;">ผู้ส่งมอบ / แหล่งที่มา (เดิม)</span>
+                <input class="control" name="donorName" value="${esc(detectedDonors)}" placeholder="เช่น รพ.พยุห์ และ NCD ทหาร" required>
+              </label>
+            </div>
+
+            <label class="field compact">
+              <span style="font-weight:600;">ผู้รับมอบ / มอบสนับสนุนแก่</span>
+              <input class="control" name="recipientName" value="${esc(t.facility || 'ศูนย์พักพิง')}" placeholder="เช่น ศูนย์พักพิง / รพ.สต." required>
+            </label>
+
+            <!-- Item Requisition Numbers -->
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <span style="font-size:13px;font-weight:700;color:var(--heading);">📄 เลขที่ใบเบิกของแต่ละรายการ</span>
+                <small style="color:var(--muted);font-size:11px;">*กรอกเลขที่ใบเบิกสำหรับแสดงในตารางเอกสารแนบ</small>
+              </div>
+              <div style="display:grid;gap:8px;">
+                ${itemsReqNoHtml}
+              </div>
+            </div>
+
+            <label class="field compact">
+              <span style="font-weight:600;">เหตุผลในการมอบสิ่งของ</span>
+              <textarea class="control" name="reason" rows="2" style="resize:vertical;font-size:13px;" required>เพื่อนำไปใช้ประโยชน์ในภารกิจการดูแลสุขภาพและรักษาพยาบาลประชาชนในพื้นที่จังหวัดศรีสะเกษ</textarea>
+            </label>
+
+            <div style="border-top:1px solid var(--line);padding-top:12px;margin-top:2px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <span style="font-size:13px;font-weight:700;color:var(--heading);">ข้อมูลผู้ลงนามบันทึกข้อความ</span>
+                <button type="button" class="button secondary small" id="btn-manage-sign-memo-outbound" style="border-radius:999px;padding:4px 12px;font-size:12px;display:inline-flex;align-items:center;gap:6px;">${icon('gear')} จัดการรายชื่อ</button>
+              </div>
+
+              <div id="memo-outbound-datalist-container">${renderDatalist()}</div>
+
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                <label class="field compact">
+                  <span>ชื่อผู้ลงนาม</span>
+                  <input class="control" id="memo-outbound-signer-name" name="signerName" list="memo-outbound-personnel-names" value="${esc(defSigner.name || '')}" placeholder="เลือกหรือพิมพ์ชื่อ...">
+                </label>
+                <label class="field compact">
+                  <span>ตำแหน่งผู้ลงนาม</span>
+                  <input class="control" id="memo-outbound-signer-pos" name="signerPos" value="${esc(defSigner.position || '')}" placeholder="ตำแหน่ง...">
+                </label>
+              </div>
+            </div>
+          </div>
+          <div class="modal-foot">
+            <button class="button secondary" type="button" data-close>ยกเลิก</button>
+            <button class="button primary" type="submit">${icon('printer')} พิมพ์ / จัดทำบันทึกข้อความ</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+
+  openModal(html, modal => {
+    const nameInp = $('#memo-outbound-signer-name', modal);
+    const posInp = $('#memo-outbound-signer-pos', modal);
+
+    const setupAutofill = () => {
+      nameInp?.addEventListener('input', () => {
+        const match = personnel.find(p => p.name === nameInp.value.trim());
+        if (match && posInp) posInp.value = match.position || '';
+      });
+    };
+    setupAutofill();
+
+    $('#btn-manage-sign-memo-outbound', modal)?.addEventListener('click', () => {
+      openManageSignatoriesModal(updatedList => {
+        personnel = updatedList;
+        const dl = $('#memo-outbound-datalist-container', modal);
+        if (dl) dl.innerHTML = renderDatalist();
+        setupAutofill();
+      }, { allowNote: true });
+    });
+
+    $('#memo-outbound-prompt-form', modal)?.addEventListener('submit', e => {
+      e.preventDefault();
+      const fd = new FormData(e.currentTarget);
+      const signerName = (fd.get('signerName') || '').trim();
+      const matchedP = personnel.find(p => p.name === signerName);
+      const itemReqNos = [];
+      const reqInputs = $$('.memo-item-req-input', modal);
+      reqInputs.forEach(inp => {
+        itemReqNos.push((inp.value || '').trim());
+      });
+
+      const meta = {
+        memoNo: (fd.get('memoNo') || '').trim(),
+        memoDate: fd.get('memoDate') || t.date,
+        subject: fd.get('subject') || 'รายงานการจัดสรรยาและเวชภัณฑ์',
+        itemName: fd.get('itemName') || 'ยาและเวชภัณฑ์',
+        donorName: fd.get('donorName') || detectedDonors,
+        recipientName: fd.get('recipientName') || t.facility || 'ศูนย์พักพิง',
+        itemReqNos: itemReqNos,
+        reason: fd.get('reason') || '',
+        signerName: signerName,
+        signerPos: fd.get('signerPos') || '',
+        signerNote: matchedP?.note || ''
+      };
+      if (!t.memoDone) {
+        api(`/api/transactions/${t.id}/memo`, {
+          method: 'POST',
+          body: JSON.stringify({ memoDone: true })
+        }).then(() => {
+          t.memoDone = true;
+          const memoChk = document.getElementById('memo-status-chk');
+          const memoBadge = document.getElementById('memo-status-badge');
+          if (memoChk) memoChk.checked = true;
+          if (memoBadge) {
+            memoBadge.className = 'doc-memo-badge done';
+            memoBadge.innerHTML = `${icon('check')} ทำบันทึกข้อความแล้ว (สำเร็จ)`;
+          }
+          const cardEl = document.querySelector(`.transaction-card[data-id="${t.id}"]`);
+          if (cardEl) {
+            const memoSpan = cardEl.querySelector('.card-memo-status');
+            if (memoSpan) {
+              memoSpan.style.color = 'var(--primary)';
+              memoSpan.textContent = '● ทำบันทึกข้อความแล้ว';
+            }
+          }
+        }).catch(() => {});
+      }
+      closeModal();
+      printOutboundMemoDocument(t, meta);
+    });
+  });
+}
+
+function printOutboundMemoDocument(t, meta) {
+  if (!meta) {
+    meta = {
+      memoNo: '',
+      memoDate: t.date || today(),
+      subject: 'รายงานการจัดสรรยาและเวชภัณฑ์',
+      itemName: 'ยาและเวชภัณฑ์',
+      donorName: 'คลังเวชภัณฑ์ สำนักงานสาธารณสุขจังหวัดศรีสะเกษ',
+      recipientName: t.facility || 'ศูนย์พักพิง',
+      itemReqNos: [],
+      reason: 'เพื่อนำไปใช้ประโยชน์ในภารกิจการดูแลสุขภาพและรักษาพยาบาลประชาชนในพื้นที่จังหวัดศรีสะเกษ',
+      signerName: '',
+      signerPos: '',
+      signerNote: ''
+    };
+  }
+
+  const printWindow = window.open('', '_blank');
+  if (!printWindow) {
+    alert('กรุณาอนุญาตป๊อปอัป (Popup) เพื่อพิมพ์เอกสาร');
+    return;
+  }
+
+  const d = new Date(meta.memoDate || t.date || today());
+  const thMonths = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+  const day = d.getDate();
+  const month = thMonths[d.getMonth()];
+  const year = d.getFullYear() + 543;
+  const thaiDateFormatted = `${toThaiNum(day)} ${month} ${toThaiNum(year)}`;
+
+  const itemReqNos = meta.itemReqNos || [];
+  const itemsRows = (t.items || []).map((line, idx) => {
+    const rowReqNo = (itemReqNos[idx] !== undefined && itemReqNos[idx] !== '')
+      ? itemReqNos[idx]
+      : (meta.requisitionNo || t.refNo || '-');
+    return `
+      <tr>
+        <td style="text-align:center;">${toThaiNum(idx + 1)}.</td>
+        <td style="text-align:left; padding: 2mm 3.5mm;">${esc(toThaiNum(line.item?.name || line.itemId))}</td>
+        <td style="text-align:center;">${toThaiNum(fmt.format(line.qty))}</td>
+        <td style="text-align:center;">${esc(toThaiNum(line.item?.unit || 'หน่วย'))}</td>
+        <td style="text-align:center;">${esc(toThaiNum(rowReqNo))}</td>
+      </tr>
+    `;
+  }).join('');
+
+  const html = `
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <title>บันทึกข้อความ - ${esc(toThaiNum(meta.memoNo || t.refNo))}</title>
+  <style>
+    ${officialDocumentFontCss()}
+    @page {
+      size: A4 portrait;
+      margin: 20mm 20mm 20mm 25mm;
+    }
+    * { box-sizing: border-box; }
+    html { background: #e5e7eb; }
+    body {
+      font-family: 'TH Sarabun New', Sarabun, sans-serif;
+      font-size: 16pt;
+      line-height: 1.22;
+      color: #000;
+      background: #fff;
+      margin: 0;
+    }
+    .page-container {
+      position: relative;
+      min-height: 250mm;
+    }
+    .garuda {
+      width: 18mm;
+      height: 18mm;
+      object-fit: contain;
+      display: block;
+      margin: 0 0 2mm 0;
+    }
+    .memo-title {
+      font-size: 29pt;
+      font-weight: 700;
+      text-align: center;
+      margin: -14mm 0 6mm 0;
+      line-height: 1;
+    }
+    .meta-table {
+      width: 100%;
+      margin-bottom: 3mm;
+      border-collapse: collapse;
+      font-size: 16pt;
+      border: none !important;
+    }
+    .meta-table td {
+      border: none !important;
+      padding: 1mm 0;
+      vertical-align: top;
+    }
+    .body-p {
+      text-indent: 2.5cm;
+      margin: 3.5mm 0;
+      text-align: justify;
+      line-height: 1.25;
+    }
+    .signature-section {
+      margin-top: 25mm;
+      margin-left: 45%;
+      text-align: center;
+      page-break-inside: avoid;
+      line-height: 1.25;
+    }
+    .page-break {
+      page-break-before: always;
+      break-before: page;
+      margin-top: 20mm;
+      border-top: 1px dashed #cbd5e1;
+    }
+    .attachment-title {
+      font-size: 16pt;
+      font-weight: 700;
+      text-align: center;
+      margin-bottom: 6mm;
+      padding-top: 5mm;
+      line-height: 1.3;
+    }
+    table.data-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 4mm 0;
+      font-size: 16pt;
+    }
+    table.data-table th, table.data-table td {
+      border: 1pt solid #000;
+      padding: 2.2mm 2mm;
+      line-height: 1.15;
+    }
+    table.data-table th {
+      background: #fff;
+      text-align: center;
+      font-weight: bold;
+    }
+    .no-print-bar {
+      background: #f1f5f9;
+      padding: 12px;
+      text-align: center;
+      border-bottom: 1px solid #cbd5e1;
+      margin-bottom: 20px;
+    }
+    .print-btn {
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      padding: 8px 20px;
+      font-size: 15px;
+      font-weight: bold;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .docx-btn {
+      background: #0f766e;
+      color: #fff;
+      border: none;
+      padding: 8px 20px;
+      font-size: 15px;
+      font-weight: bold;
+      border-radius: 6px;
+      cursor: pointer;
+      margin-left: 10px;
+    }
+    .docx-btn:hover { background: #0d5f58; }
+    .print-btn:disabled { opacity: .55; cursor: wait; }
+    @media screen {
+      body { width: 210mm; margin: 12mm auto; padding: 20mm 20mm 20mm 25mm; box-shadow: 0 12px 36px rgba(15,23,42,.18); }
+      .no-print-bar { margin: -20mm -20mm 10mm -25mm; }
+      .page-break { margin-left: -25mm; margin-right: -20mm; padding-left: 25mm; padding-right: 20mm; }
+    }
+    @media print {
+      .no-print-bar { display: none !important; }
+      html, body { background: #fff !important; }
+      body { width: auto; min-height: 0; padding: 0 !important; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+      .page-break { border: none !important; margin: 0; padding: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="no-print-bar">
+    <button class="print-btn" id="print-document-btn" data-ready-label="พิมพ์ / บันทึกเป็น PDF" disabled>กำลังเตรียมฟอนต์ TH Sarabun New...</button>
+    <button class="print-btn docx-btn" id="download-docx-btn" type="button">พิมพ์ / บันทึกเป็น DOCX</button>
+  </div>
+
+  <!-- หน้า 1: บันทึกข้อความ (รายการเบิกจ่าย) -->
+  <div class="page-container">
+    <img class="garuda" src="${window.location.origin}/garuda.svg" alt="ตราครุฑ">
+    <div class="memo-title">บันทึกข้อความ</div>
+
+    <table class="meta-table">
+      <tr>
+        <td colspan="2"><strong>ส่วนราชการ</strong> กลุ่มงานคุ้มครองผู้บริโภคและเภสัชสาธารณสุข สำนักงานสาธารณสุขจังหวัดศรีสะเกษ</td>
+      </tr>
+      <tr>
+        <td style="width: 50%;"><strong>ที่</strong> ศก ๐๐๓๓.๐๐๔/${meta.memoNo ? esc(toThaiNum(meta.memoNo)) : ''}</td>
+        <td style="text-align: left;"><strong>วันที่</strong> ${thaiDateFormatted}</td>
+      </tr>
+      <tr>
+        <td colspan="2"><strong>เรื่อง</strong> ${esc(toThaiNum(meta.subject))}</td>
+      </tr>
+    </table>
+
+    <p style="margin: 2mm 0 3.5mm 0;"><strong>เรียน</strong> นายแพทย์สาธารณสุขจังหวัดศรีสะเกษ</p>
+
+    <p class="body-p">
+      <strong>เรื่องเดิม</strong> ด้วยกลุ่มงานคุ้มครองผู้บริโภคและเภสัชสาธารณสุข สำนักงานสาธารณสุข จังหวัดศรีสะเกษ ได้รับ${esc(toThaiNum(meta.itemName))} จาก${esc(toThaiNum(meta.donorName))} ${esc(toThaiNum(meta.reason))}
+    </p>
+
+    <p class="body-p">
+      <strong>ข้อพิจารณา</strong> ในการนี้ กลุ่มงานคุ้มครองผู้บริโภคและเภสัชสาธารณสุข สำนักงานสาธารณสุขจังหวัดศรีสะเกษ จึงขอดำเนินการจัดสรร${esc(toThaiNum(meta.itemName))}และดำเนินการส่งมอบแก่${esc(toThaiNum(meta.recipientName || 'ศูนย์พักพิง'))} เพื่อประชาชนได้ใช้ประโยชน์ต่อไป รายละเอียดแนบมาพร้อมนี้
+    </p>
+
+    <p class="body-p">
+      <strong>ข้อเสนอ</strong> จึงเรียนมาเพื่อทราบ
+    </p>
+
+    <div class="signature-section">
+      <div>( ${esc(toThaiNum(meta.signerName ? meta.signerName : '...................................................'))} )</div>
+      <div style="margin-top: 1.5mm;">${esc(toThaiNum(meta.signerPos ? meta.signerPos : '...................................................'))}</div>
+      ${meta.signerNote ? `<div style="margin-top: 1.5mm; font-size: 14pt; color: #333;">${esc(toThaiNum(meta.signerNote))}</div>` : ''}
+    </div>
+  </div>
+
+  <!-- หน้า 2: รายการแนบ (รายการเบิกจ่าย) -->
+  <div class="page-break"></div>
+  <div class="page-container" style="padding-top: 10mm;">
+    <div class="attachment-title">
+      รายการ${esc(toThaiNum(meta.itemName))} ที่ได้รับสนับสนุนจาก${esc(toThaiNum(meta.donorName))}มอบสนับสนุนแก่${esc(toThaiNum(meta.recipientName || 'ศูนย์พักพิง'))}
+    </div>
+
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th style="width: 10%; text-align: center;">ลำดับ</th>
+          <th style="width: 45%; text-align: center;">รายการ</th>
+          <th style="width: 15%; text-align: center;">จำนวน</th>
+          <th style="width: 12%; text-align: center;">หน่วย</th>
+          <th style="width: 18%; text-align: center;">เลขที่ใบเบิก</th>
         </tr>
       </thead>
       <tbody>
@@ -2393,23 +2869,27 @@ function printThankYouDocument(t, meta) {
 }
 
 function getSignatories() {
+  const defaultList = [
+    { id: '1', name: 'นางสาวมัลลิกา สุพล', position: 'หัวหน้ากลุ่มงานคุ้มครองผู้บริโภคและเภสัชสาธารณสุข', note: '' }
+  ];
   try {
-    const raw = localStorage.getItem('ssk_personnel_list_v4');
+    const raw = localStorage.getItem('ssk_personnel_list_v5');
     if (raw !== null) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed) && parsed.length) return parsed;
     }
   } catch (e) {}
-  return [];
+  return defaultList;
 }
 
 function saveSignatories(list) {
   try {
-    localStorage.setItem('ssk_personnel_list_v4', JSON.stringify(list));
+    localStorage.setItem('ssk_personnel_list_v5', JSON.stringify(list));
   } catch (e) {}
 }
 
-function openManageSignatoriesModal(onChanged) {
+function openManageSignatoriesModal(onChanged, options = {}) {
+  const allowNote = Boolean(options.allowNote);
   let list = getSignatories();
   function renderList() {
     const container = $('#personnel-items-container');
@@ -2418,7 +2898,7 @@ function openManageSignatoriesModal(onChanged) {
       <div class="personnel-item">
         <div>
           <strong>${esc(p.name)}</strong>
-          <small>${esc(p.position || 'ไม่ระบุตำแหน่ง')}</small>
+          <small>${esc(p.position || 'ไม่ระบุตำแหน่ง')}${p.note ? ` · <span style="color:var(--primary);">${esc(p.note)}</span>` : ''}</small>
         </div>
         <button type="button" class="icon-button danger btn-del-person" data-index="${idx}" title="ลบรายชื่อ" aria-label="ลบรายชื่อ">${icon('close')}</button>
       </div>
@@ -2434,6 +2914,38 @@ function openManageSignatoriesModal(onChanged) {
     });
   }
 
+  const inputFormHtml = allowNote
+    ? `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+        <label class="field compact" style="margin:0;">
+          <span>ชื่อ-นามสกุล <b class="required">*</b></span>
+          <input class="control" id="new-person-name" placeholder="เช่น ภก.สมชาย ใจดี">
+        </label>
+        <label class="field compact" style="margin:0;">
+          <span>ตำแหน่ง <b class="required">*</b></span>
+          <input class="control" id="new-person-pos" placeholder="เช่น เภสัชกรชำนาญการ">
+        </label>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end;margin-bottom:14px;">
+        <label class="field compact" style="margin:0;">
+          <span>หมายเหตุ (เช่น ปฏิบัติราชการแทน/แทน)</span>
+          <input class="control" id="new-person-note" value="แทน หัวหน้ากลุ่มงานคุ้มครองผู้บริโภคและเภสัชสาธารณสุข" placeholder="เช่น แทน หัวหน้ากลุ่มงานคุ้มครองผู้บริโภคและเภสัชสาธารณสุข">
+        </label>
+        <button type="button" class="button primary small" id="btn-add-person" style="height:42px;">${icon('plus')} เพิ่ม</button>
+      </div>`
+    : `
+      <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;margin-bottom:14px;">
+        <label class="field compact" style="margin:0;">
+          <span>ชื่อ-นามสกุล <b class="required">*</b></span>
+          <input class="control" id="new-person-name" placeholder="เช่น ภก.สมชาย ใจดี">
+        </label>
+        <label class="field compact" style="margin:0;">
+          <span>ตำแหน่ง <b class="required">*</b></span>
+          <input class="control" id="new-person-pos" placeholder="เช่น เภสัชกรชำนาญการ">
+        </label>
+        <button type="button" class="button primary small" id="btn-add-person" style="height:42px;">${icon('plus')} เพิ่ม</button>
+      </div>`;
+
   const html = `
     <div class="modal-backdrop" role="presentation">
       <div class="modal" style="width:min(580px, 96vw);" role="dialog" aria-modal="true" aria-labelledby="manage-sign-title">
@@ -2443,17 +2955,7 @@ function openManageSignatoriesModal(onChanged) {
         </div>
         <div class="modal-body">
           <p style="font-size:12px;color:var(--muted);margin-bottom:14px;">เพิ่มหรือลบรายชื่อบุคลากรเพื่อใช้เลือกเป็นผู้ลงนามในเอกสารราชการต่างๆ</p>
-          <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;margin-bottom:14px;">
-            <label class="field compact" style="margin:0;">
-              <span>ชื่อ-นามสกุล <b class="required">*</b></span>
-              <input class="control" id="new-person-name" placeholder="เช่น ภก.สมชาย ใจดี">
-            </label>
-            <label class="field compact" style="margin:0;">
-              <span>ตำแหน่ง <b class="required">*</b></span>
-              <input class="control" id="new-person-pos" placeholder="เช่น เภสัชกรชำนาญการ">
-            </label>
-            <button type="button" class="button primary small" id="btn-add-person" style="height:42px;">${icon('plus')} เพิ่ม</button>
-          </div>
+          ${inputFormHtml}
           <div class="personnel-list" id="personnel-items-container"></div>
         </div>
         <div class="modal-foot">
@@ -2466,14 +2968,17 @@ function openManageSignatoriesModal(onChanged) {
     renderList();
     const nameInp = $('#new-person-name', modal);
     const posInp = $('#new-person-pos', modal);
+    const noteInp = $('#new-person-note', modal);
     $('#btn-add-person', modal)?.addEventListener('click', () => {
       const name = nameInp.value.trim();
       const pos = posInp.value.trim();
+      const note = noteInp ? noteInp.value.trim() : '';
       if (!name) return toast('กรุณาระบุชื่อ-นามสกุล', 'error');
-      list.push({ id: 'p-' + Date.now(), name, position: pos });
+      list.push({ id: 'p-' + Date.now(), name, position: pos, note });
       saveSignatories(list);
       nameInp.value = '';
       posInp.value = '';
+      if (noteInp) noteInp.value = 'แทน หัวหน้ากลุ่มงานคุ้มครองผู้บริโภคและเภสัชสาธารณสุข';
       renderList();
       if (typeof onChanged === 'function') onChanged(list);
       toast(`เพิ่มรายชื่อ "${name}" เรียบร้อย`);
@@ -2558,7 +3063,7 @@ async function openOutboundRequisitionPromptModal(t) {
                     <input type="checkbox" name="reqCategory" value="ยา"> ยา
                   </label>
                   <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
-                    <input type="checkbox" name="reqCategory" value="เวชภัณฑ์" checked> เวชภัณฑ์
+                    <input type="checkbox" name="reqCategory" value="เวชภัณฑ์"> เวชภัณฑ์
                   </label>
                   <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
                     <input type="checkbox" name="reqCategory" value="วัสดุ"> วัสดุ
@@ -3627,9 +4132,13 @@ async function openTransactionDetail(txnId, pageType) {
         });
       }
 
-      // Print Memo Button (Opens Inbound Memo Prompt Modal)
+      // Print Memo Button (Opens Inbound or Outbound Memo Prompt Modal)
       $('#print-memo-btn', modal)?.addEventListener('click', () => {
-        openInboundMemoPromptModal(t);
+        if (isInbound) {
+          openInboundMemoPromptModal(t);
+        } else {
+          openOutboundMemoPromptModal(t);
+        }
       });
 
       // Print Thank You Button (Opens Thank You Prompt Modal)

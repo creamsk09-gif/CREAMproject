@@ -462,8 +462,8 @@ async function api(req, res, url) {
       return error(res, 429, 'RATE_LIMITED', 'พยายามเข้าสู่ระบบมากเกินไป กรุณารอ 15 นาที');
     }
     const input = await body(req);
-    const user = process.env.STOCK_DEMO_USERNAME || (IS_PRODUCTION ? '' : 'admin');
-    const pass = process.env.STOCK_DEMO_PASSWORD || (IS_PRODUCTION ? '' : 'stock2569');
+    const user = process.env.STOCK_DEMO_USERNAME || 'admin';
+    const pass = process.env.STOCK_DEMO_PASSWORD || 'stock2569';
     if (!user || !pass) return error(res, 503, 'CONFIG_INVALID', 'ระบบ production ยังไม่ได้ตั้งค่าบัญชีผู้ดูแล');
     if (input.username !== user || input.password !== pass) return error(res, 401, 'LOGIN_FAILED', 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');
     loginAttempts.delete(ip);

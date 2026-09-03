@@ -802,8 +802,46 @@ async function api(req, res, url) {
   if (req.method === 'GET' && url.pathname === '/api/transactions') {
     const type = url.searchParams.get('type');
     const q = (url.searchParams.get('q') || '').trim().toLowerCase();
+    const facility = url.searchParams.get('facility');
+    const startDate = url.searchParams.get('startDate');
+    const endDate = url.searchParams.get('endDate');
+    const memoStatus = url.searchParams.get('memoStatus'); // 'all', 'done', 'pending'
+
     let rows = db.transactions.filter(t => !type || t.type === type);
-    if (q) rows = rows.filter(t => `${t.refNo} ${t.facility} ${t.note || ''}`.toLowerCase().includes(q));
+
+    // Filter by facility
+    if (facility && facility !== 'all') {
+      rows = rows.filter(t => t.facility === facility);
+    }
+
+    // Filter by date range
+    if (startDate) {
+      rows = rows.filter(t => (t.date || '').slice(0, 10) >= startDate);
+    }
+    if (endDate) {
+      rows = rows.filter(t => (t.date || '').slice(0, 10) <= endDate);
+    }
+
+    // Filter by memo status
+    if (memoStatus === 'done') {
+      rows = rows.filter(t => Boolean(t.memoDone));
+    } else if (memoStatus === 'pending') {
+      rows = rows.filter(t => !t.memoDone);
+    }
+
+    // Filter by search query (refNo, facility, note, or item names)
+    if (q) {
+      rows = rows.filter(t => {
+        const itemNames = (t.items || []).map(i => {
+          const directName = i.item?.name || '';
+          const lookedUp = db.items.find(x => x.id === (i.itemId || i.item?.id))?.name || '';
+          return `${directName} ${lookedUp} ${i.itemId || ''}`;
+        }).join(' ');
+        const text = `${t.refNo} ${t.facility} ${t.note || ''} ${itemNames}`.toLowerCase();
+        return text.includes(q);
+      });
+    }
+
     rows = rows.map(t => ({ ...t, lineCount: t.items.length, totalQty: t.items.reduce((n, i) => n + i.qty, 0) }));
     
     // Sort

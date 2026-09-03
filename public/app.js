@@ -981,8 +981,9 @@ async function transactionPage(type) {
   state.draft = [];
   state.selectedBill = null;
   const inbound = type === 'inbound';
-  const d = await api(`/api/transactions?type=${type}&limit=30`);
-  state.facilities = d.facilities;
+  const d = await api(`/api/transactions?limit=100`);
+  state.recentTransactions = d.transactions || [];
+  state.facilities = d.facilities || [];
 
   $('#main-content').innerHTML = `
     ${pageHead(inbound ? 'inbound' : 'outbound', inbound ? '' : 'orange', inbound ? 'รับเข้าคลัง' : 'เบิกจ่ายออกจากคลัง', inbound ? 'บันทึกแหล่งที่มา ล็อต และวันหมดอายุให้ตรวจสอบย้อนหลังได้' : 'ตัดสต็อกแบบตรวจจำนวนคงเหลือก่อนยืนยัน', `<button class="button secondary" id="clear-form">ล้างแบบฟอร์ม</button>`)}
@@ -1045,8 +1046,11 @@ async function transactionPage(type) {
             <input class="control" id="line-qty" type="number" min="0.01" step="0.01" placeholder="0">
           </label>
           <label class="field compact">
-            <span>ล็อต</span>
-            <input class="control" id="line-lot" placeholder="Lot no.">
+            <div class="field-header">
+              <span>ล็อต ${!inbound ? '<span style="color:var(--primary);font-size:10.5px;font-weight:600;">(แนะนำ FEFO)</span>' : ''}</span>
+            </div>
+            <input class="control" id="line-lot" placeholder="${inbound ? 'ระบุล็อตใหม่' : 'เลือกล็อต'}" list="line-lot-options" autocomplete="off">
+            <datalist id="line-lot-options"></datalist>
           </label>
           <label class="field compact">
             <span>วันหมดอายุ</span>
@@ -1054,6 +1058,7 @@ async function transactionPage(type) {
           </label>
           <button class="button ${inbound ? 'primary' : 'orange'} add-line" type="button" id="add-line">${icon('plus')} เพิ่ม</button>
         </div>
+        <div id="fefo-recommendation-box" style="display:none;margin-top:10px;padding:10px 14px;background:linear-gradient(135deg,rgba(245,158,11,.08),rgba(234,88,12,.05));border:1px solid rgba(245,158,11,.3);border-radius:8px;font-size:12.5px;line-height:1.45;color:#92400e;"></div>
         <div id="draft-lines" class="draft-table"></div>
       </div>
       <div class="form-footer">
@@ -1062,9 +1067,51 @@ async function transactionPage(type) {
       </div>
     </form>
     <section class="card">
-      <div class="card-head">
-        <div><h2>สรุปรายการ${inbound ? 'รับเข้า' : 'เบิกจ่าย'}ล่าสุด</h2><p>คลิกการ์ดเพื่อดูรายละเอียดหรือยกเลิกเอกสาร</p></div>
+      <div class="card-head" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+        <div>
+          <h2>สรุปรายการ${inbound ? 'รับเข้า' : 'เบิกจ่าย'}ล่าสุด</h2>
+          <p>คลิกการ์ดเพื่อดูรายละเอียด พิมพ์เอกสาร หรือยกเลิกรายการ</p>
+        </div>
       </div>
+
+      <!-- Filter Bar -->
+      <div class="table-tools" style="padding:12px 14px;background:#f8fafc;border-radius:10px;margin-bottom:16px;border:1px solid #e2e8f0;display:flex;flex-wrap:wrap;gap:10px;align-items:center;">
+        <div class="search" style="min-width:220px;flex:1.5;">
+          <span class="icon">${icon('search')}</span>
+          <input id="tx-summary-search" placeholder="ค้นหาเลขที่, ${inbound ? 'ผู้ส่งมอบ' : 'ผู้รับมอบ'}, หรือชื่อยา/เวชภัณฑ์...">
+        </div>
+
+        <select id="tx-summary-date-preset" class="filter-select" aria-label="กรองช่วงเวลา">
+          <option value="all">📅 ช่วงเวลา: ทั้งหมด</option>
+          <option value="today">วันนี้</option>
+          <option value="7d">7 วันล่าสุด</option>
+          <option value="this_month">เดือนนี้</option>
+          <option value="this_year">ปีนี้</option>
+          <option value="custom">กำหนดช่วงวันที่เอง...</option>
+        </select>
+
+        <div id="tx-summary-custom-date" style="display:none;align-items:center;gap:6px;">
+          <input type="date" id="tx-summary-start-date" class="control" style="height:40px;padding:0 8px;font-size:12px;width:auto;" title="ตั้งแต่วันที่">
+          <span style="color:var(--muted);font-size:12px;">ถึง</span>
+          <input type="date" id="tx-summary-end-date" class="control" style="height:40px;padding:0 8px;font-size:12px;width:auto;" title="ถึงวันที่">
+        </div>
+
+        <select id="tx-summary-memo-filter" class="filter-select" aria-label="กรองสถานะบันทึกข้อความ">
+          <option value="all">📝 บันทึกข้อความ: ทั้งหมด</option>
+          <option value="done">● ทำบันทึกข้อความแล้ว</option>
+          <option value="pending">● รอทำบันทึกข้อความ</option>
+        </select>
+
+        <select id="tx-summary-facility-filter" class="filter-select" style="max-width:220px;" aria-label="กรองหน่วยงาน">
+          <option value="all">🏥 ${inbound ? 'ผู้ส่งมอบ: ทั้งหมด' : 'ผู้รับมอบ: ทั้งหมด'}</option>
+          ${state.facilities.filter(f => f.type === type).map(f => `<option value="${esc(f.name)}">${esc(f.name)}</option>`).join('')}
+        </select>
+
+        <button type="button" id="tx-summary-reset-btn" class="button secondary small" style="height:40px;padding:0 12px;font-size:12px;display:none;align-items:center;gap:6px;">
+          ${icon('refresh')} ล้างตัวกรอง
+        </button>
+      </div>
+
       <div id="transaction-list-container">
         <!-- populated dynamically -->
         <div style="padding: 20px; text-align: center; color: var(--muted);">กำลังโหลดรายการ...</div>
@@ -1073,10 +1120,133 @@ async function transactionPage(type) {
 
   renderDraft(type);
   $('#add-line').addEventListener('click', () => addDraft(type));
-  $('#line-item').addEventListener('change', syncLineDefaults);
+  $('#line-item').addEventListener('change', () => syncLineDefaults(type));
+  $('#line-lot')?.addEventListener('input', () => {
+    if (type === 'outbound') {
+      const itemId = $('#line-item')?.value;
+      const lots = getItemLots(itemId);
+      const chosenLotVal = ($('#line-lot')?.value || '').trim();
+      const matched = lots.find(l => l.lot.toLowerCase() === chosenLotVal.toLowerCase());
+      if (matched && matched.expiry) {
+        $('#line-expiry').value = matched.expiry;
+      }
+      const fefoBox = $('#fefo-recommendation-box');
+      if (fefoBox && lots.length > 0) {
+        const bestLot = lots[0];
+        if (matched && matched.lot !== bestLot.lot && bestLot.expiry && matched.expiry && matched.expiry > bestLot.expiry) {
+          fefoBox.innerHTML = `
+            <div style="display:flex;align-items:flex-start;gap:8px;">
+              <span style="font-size:16px;">⚠️</span>
+              <div>
+                <strong>คุณเลือกล็อต: <span style="text-decoration:underline;">${esc(matched.lot)}</span></strong> (หมดอายุ ${fdate(matched.expiry)})<br>
+                <span style="font-size:11.5px;color:#b45309;">💡 <strong>ข้อแนะนำ FEFO:</strong> ในคลังมีล็อต <strong>${esc(bestLot.lot)}</strong> ที่จะหมดอายุก่อน (${fdate(bestLot.expiry)}) แนะนำให้พิจารณาจ่ายล็อต <strong>${esc(bestLot.lot)}</strong> ก่อนเพื่อลดความเสี่ยงยาเสื่อมสภาพค้างคลัง</span>
+              </div>
+            </div>
+          `;
+          fefoBox.style.display = 'block';
+        }
+      }
+    }
+  });
   $('#transaction-form').addEventListener('submit', e => submitTransaction(e, type));
   $('#clear-form').addEventListener('click', () => clearTransactionForm(type));
   $('#cancel-draft').addEventListener('click', () => { state.draft = []; renderDraft(type); });
+
+  // Filter state for summary
+  state.txFilter = {
+    q: '',
+    datePreset: 'all',
+    startDate: '',
+    endDate: '',
+    memoStatus: 'all',
+    facility: 'all'
+  };
+
+  const syncFilterControls = () => {
+    const isFiltered = Boolean(
+      state.txFilter.q ||
+      state.txFilter.datePreset !== 'all' ||
+      state.txFilter.startDate ||
+      state.txFilter.endDate ||
+      state.txFilter.memoStatus !== 'all' ||
+      state.txFilter.facility !== 'all'
+    );
+    const resetBtn = $('#tx-summary-reset-btn');
+    if (resetBtn) resetBtn.style.display = isFiltered ? 'inline-flex' : 'none';
+  };
+
+  let debounceTimer = null;
+  const triggerTxFilterReload = () => {
+    syncFilterControls();
+    loadTxPage(type, 1);
+  };
+
+  $('#tx-summary-search')?.addEventListener('input', e => {
+    state.txFilter.q = (e.target.value || '').trim();
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(triggerTxFilterReload, 280);
+  });
+
+  const datePresetSel = $('#tx-summary-date-preset');
+  const customDateWrap = $('#tx-summary-custom-date');
+  const startDateInp = $('#tx-summary-start-date');
+  const endDateInp = $('#tx-summary-end-date');
+
+  datePresetSel?.addEventListener('change', e => {
+    state.txFilter.datePreset = e.target.value;
+    if (e.target.value === 'custom') {
+      if (customDateWrap) customDateWrap.style.display = 'inline-flex';
+    } else {
+      if (customDateWrap) customDateWrap.style.display = 'none';
+      state.txFilter.startDate = '';
+      state.txFilter.endDate = '';
+      if (startDateInp) startDateInp.value = '';
+      if (endDateInp) endDateInp.value = '';
+    }
+    triggerTxFilterReload();
+  });
+
+  startDateInp?.addEventListener('change', e => {
+    state.txFilter.startDate = e.target.value;
+    triggerTxFilterReload();
+  });
+
+  endDateInp?.addEventListener('change', e => {
+    state.txFilter.endDate = e.target.value;
+    triggerTxFilterReload();
+  });
+
+  $('#tx-summary-memo-filter')?.addEventListener('change', e => {
+    state.txFilter.memoStatus = e.target.value;
+    triggerTxFilterReload();
+  });
+
+  $('#tx-summary-facility-filter')?.addEventListener('change', e => {
+    state.txFilter.facility = e.target.value;
+    triggerTxFilterReload();
+  });
+
+  $('#tx-summary-reset-btn')?.addEventListener('click', () => {
+    state.txFilter = {
+      q: '',
+      datePreset: 'all',
+      startDate: '',
+      endDate: '',
+      memoStatus: 'all',
+      facility: 'all'
+    };
+    const searchInp = $('#tx-summary-search');
+    if (searchInp) searchInp.value = '';
+    if (datePresetSel) datePresetSel.value = 'all';
+    if (customDateWrap) customDateWrap.style.display = 'none';
+    if (startDateInp) startDateInp.value = '';
+    if (endDateInp) endDateInp.value = '';
+    const memoSel = $('#tx-summary-memo-filter');
+    if (memoSel) memoSel.value = 'all';
+    const facSel = $('#tx-summary-facility-filter');
+    if (facSel) facSel.value = 'all';
+    triggerTxFilterReload();
+  });
 
   // Bill File Attachment Handlers
   const billFileInput = $('#bill-file-input');
@@ -1125,7 +1295,7 @@ async function transactionPage(type) {
       if (lineItem) {
         lineItem.innerHTML = `<option value="">— เลือกรายการ —</option>${state.items.map(i => `<option value="${i.id}">${esc(i.name)} · คงเหลือ ${fmt.format(i.qty)} ${esc(i.unit)}</option>`).join('')}`;
         lineItem.value = newItem.id;
-        syncLineDefaults();
+        syncLineDefaults(type);
       }
     });
   });
@@ -1133,14 +1303,56 @@ async function transactionPage(type) {
   loadTxPage(type, 1);
 }
 
-async function loadTxPage(type, page) {
+function getDateRangeFromPreset(preset) {
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const fmt = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+  if (preset === 'today') {
+    const todayStr = fmt(now);
+    return { startDate: todayStr, endDate: todayStr };
+  }
+  if (preset === '7d') {
+    const past = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    return { startDate: fmt(past), endDate: fmt(now) };
+  }
+  if (preset === 'this_month') {
+    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    return { startDate: fmt(firstDay), endDate: fmt(lastDay) };
+  }
+  if (preset === 'this_year') {
+    const firstDay = new Date(now.getFullYear(), 0, 1);
+    const lastDay = new Date(now.getFullYear(), 11, 31);
+    return { startDate: fmt(firstDay), endDate: fmt(lastDay) };
+  }
+  return { startDate: '', endDate: '' };
+}
+
+async function loadTxPage(type, page = 1) {
   const container = $('#transaction-list-container');
   if (!container) return;
+  const filter = state.txFilter || {};
+  let url = `/api/transactions?type=${type}&limit=9&page=${page}`;
+  if (filter.q) url += `&q=${encodeURIComponent(filter.q)}`;
+  if (filter.facility && filter.facility !== 'all') url += `&facility=${encodeURIComponent(filter.facility)}`;
+  if (filter.memoStatus && filter.memoStatus !== 'all') url += `&memoStatus=${encodeURIComponent(filter.memoStatus)}`;
+  
+  let sDate = filter.startDate || '';
+  let eDate = filter.endDate || '';
+  if (filter.datePreset && filter.datePreset !== 'all' && filter.datePreset !== 'custom') {
+    const range = getDateRangeFromPreset(filter.datePreset);
+    sDate = range.startDate;
+    eDate = range.endDate;
+  }
+  if (sDate) url += `&startDate=${encodeURIComponent(sDate)}`;
+  if (eDate) url += `&endDate=${encodeURIComponent(eDate)}`;
+
   try {
-    const d = await api(`/api/transactions?type=${type}&limit=9&page=${page}`);
+    const d = await api(url);
     container.innerHTML = `
       <div class="transaction-list">
-        ${d.transactions && d.transactions.length ? d.transactions.map(t => transactionCard(t, type)).join('') : '<div class="empty-inline">ยังไม่มีรายการ</div>'}
+        ${d.transactions && d.transactions.length ? d.transactions.map(t => transactionCard(t, type)).join('') : '<div class="empty-inline" style="grid-column: 1 / -1; padding: 32px 16px;">ไม่พบรายการที่ตรงกับเงื่อนไขการค้นหา</div>'}
       </div>
       ${d.meta ? renderPagination(d.meta, p => loadTxPage(type, p)) : ''}
     `;
@@ -1342,11 +1554,123 @@ function updateTransactionFacilitiesDatalist(selectedName = '') {
   }
 }
 
-function syncLineDefaults() {
-  const i = state.items.find(x => x.id === $('#line-item').value);
-  if (!i) return;
-  $('#line-lot').value = i.lot || '';
-  $('#line-expiry').value = i.expiry || '';
+function getItemLots(itemId) {
+  const item = state.items.find(x => x.id === itemId);
+  if (!item) return [];
+  const map = new Map();
+
+  // Add primary lot from item inventory
+  if (item.lot || item.expiry) {
+    map.set(item.lot || 'หลัก', {
+      lot: item.lot || '-',
+      expiry: item.expiry || null,
+      source: 'คงคลังปัจจุบัน'
+    });
+  }
+
+  // Find from recorded transactions
+  (state.recentTransactions || []).forEach(tx => {
+    (tx.items || []).forEach(line => {
+      const matchId = line.itemId || line.item?.id;
+      if (matchId === itemId && line.lot) {
+        if (!map.has(line.lot)) {
+          map.set(line.lot, {
+            lot: line.lot,
+            expiry: line.expiry || null,
+            source: tx.type === 'inbound' ? 'รับเข้า' : 'รายการก่อนหน้า'
+          });
+        }
+      }
+    });
+  });
+
+  const lots = Array.from(map.values());
+
+  // Sort by FEFO (First Expired, First Out): earliest expiry first
+  lots.sort((a, b) => {
+    if (!a.expiry && !b.expiry) return 0;
+    if (!a.expiry) return 1;
+    if (!b.expiry) return -1;
+    return a.expiry.localeCompare(b.expiry);
+  });
+
+  return lots;
+}
+
+function syncLineDefaults(type = 'inbound') {
+  const itemId = $('#line-item')?.value;
+  const item = state.items.find(x => x.id === itemId);
+  const lotEl = $('#line-lot');
+  const expEl = $('#line-expiry');
+  const dlEl = $('#line-lot-options');
+  const fefoBox = $('#fefo-recommendation-box');
+
+  if (!lotEl || !expEl) return;
+
+  if (!item) {
+    lotEl.value = '';
+    lotEl.placeholder = 'ล็อต';
+    expEl.value = '';
+    if (dlEl) dlEl.innerHTML = '';
+    if (fefoBox) fefoBox.style.display = 'none';
+    return;
+  }
+
+  if (type === 'inbound') {
+    // สำหรับการรับเข้า: ไม่ดึงล็อตและวันหมดอายุเดิมมาใส่ เพื่อป้องกันการบันทึกล็อตเก่าผิดพลาด
+    lotEl.value = '';
+    lotEl.placeholder = item.lot ? `ล็อตใหม่ (ล็อตเดิม: ${item.lot})` : 'ระบุล็อตใหม่';
+    expEl.value = '';
+    if (dlEl) dlEl.innerHTML = '';
+    if (fefoBox) fefoBox.style.display = 'none';
+  } else {
+    // สำหรับการเบิกจ่าย: ดึงล็อตทั้งหมดและแนะนำตามหลัก FEFO
+    const lots = getItemLots(item.id);
+    if (dlEl) {
+      dlEl.innerHTML = lots.map((l, idx) => `
+        <option value="${esc(l.lot)}">${l.expiry ? `หมดอายุ: ${fdate(l.expiry)}` : 'ไม่ระบุวันหมดอายุ'} ${idx === 0 && l.expiry ? '⭐ [แนะนำ FEFO - หมดอายุก่อน]' : ''}</option>
+      `).join('');
+    }
+
+    if (lots.length > 0) {
+      const bestLot = lots[0]; // Earliest expiry (FEFO)
+      lotEl.value = bestLot.lot !== '-' ? bestLot.lot : (item.lot || '');
+      expEl.value = bestLot.expiry || item.expiry || '';
+
+      if (fefoBox) {
+        if (bestLot.expiry) {
+          const daysLeft = Math.ceil((new Date(bestLot.expiry) - new Date()) / (1000 * 60 * 60 * 24));
+          const timeText = daysLeft > 0 ? `(เหลืออีก ${fmt.format(daysLeft)} วัน)` : '<span style="color:#b91c1c;font-weight:700;">(หมดอายุแล้ว)</span>';
+          
+          fefoBox.style.display = 'block';
+          fefoBox.innerHTML = `
+            <div style="display:flex;align-items:flex-start;gap:8px;">
+              <span style="font-size:16px;">💡</span>
+              <div>
+                <strong>แนะนำให้เบิกล็อต: <span style="color:#b45309;text-decoration:underline;">${esc(bestLot.lot)}</span></strong> &nbsp;
+                <span style="background:#fef3c7;border:1px solid #fde68a;padding:2px 7px;border-radius:6px;font-size:11.5px;font-weight:700;color:#92400e;">วันหมดอายุ: ${fdate(bestLot.expiry)} ${timeText}</span>
+                <div style="margin-top:3px;font-size:11.5px;color:#78350f;">
+                  <strong>เหตุผล (ตามหลัก FEFO - First Expired, First Out):</strong> เป็นล็อตที่มีวันหมดอายุเร็วที่สุด จึงควรนำออกไปใช้ก่อน เพื่อลดความเสี่ยงยาและเวชภัณฑ์เสื่อมสภาพค้างคลัง
+                </div>
+              </div>
+            </div>
+          `;
+        } else {
+          fefoBox.style.display = 'block';
+          fefoBox.innerHTML = `
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="font-size:15px;">📦</span>
+              <div><strong>ล็อตที่มีในคลัง: ${esc(bestLot.lot)}</strong> (ไม่ระบุวันหมดอายุ)</div>
+            </div>
+          `;
+        }
+      }
+    } else {
+      lotEl.value = item.lot || '';
+      expEl.value = item.expiry || '';
+      if (fefoBox) fefoBox.style.display = 'none';
+    }
+  }
 }
 
 function addDraft(type) {
@@ -2295,9 +2619,9 @@ function printOutboundMemoDocument(t, meta) {
 
   const itemReqNos = meta.itemReqNos || [];
   const itemsRows = (t.items || []).map((line, idx) => {
-    const rowReqNo = (itemReqNos[idx] !== undefined && itemReqNos[idx] !== '')
+    const rowReqNo = (itemReqNos[idx] !== undefined)
       ? itemReqNos[idx]
-      : (meta.requisitionNo || t.refNo || '-');
+      : (meta.requisitionNo || '');
     return `
       <tr>
         <td style="text-align:center;">${toThaiNum(idx + 1)}.</td>
@@ -3424,13 +3748,13 @@ function printOutboundRequisitionDocument(t, meta = {}) {
   <div class="sign-section">
     <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6mm;">
       <div style="width: 48%; text-align: left; padding-left: 2mm;">
-        <div>.................................................. ผู้ขอเบิก</div>
-        <div style="margin-top: 1.5mm;">(${meta.signerRequester ? ` ${esc(toThaiNum(meta.signerRequester))} ` : '..................................................'})</div>
+        <div><span style="display: inline-block; width: 49mm; text-align: center;">..................................................</span> ผู้ขอเบิก</div>
+        <div style="margin-top: 1.5mm; width: 49mm; text-align: center;">(${meta.signerRequester ? ` ${esc(toThaiNum(meta.signerRequester))} ` : '..................................................'})</div>
         <div style="margin-top: 1.5mm;">งาน ${meta.requesterDept ? esc(toThaiNum(meta.requesterDept)) : '...............................................'}</div>
       </div>
       <div style="width: 48%; text-align: left; padding-left: 5mm;">
-        <div>..................................................... ผู้สั่งจ่าย</div>
-        <div style="margin-top: 1.5mm;">(${meta.signerApprover ? ` ${esc(toThaiNum(meta.signerApprover))} ` : '.....................................................'})</div>
+        <div><span style="display: inline-block; width: 49mm; text-align: center;">..................................................</span> ผู้สั่งจ่าย</div>
+        <div style="margin-top: 1.5mm; width: 49mm; text-align: center;">(${meta.signerApprover ? ` ${esc(toThaiNum(meta.signerApprover))} ` : '..................................................'})</div>
         <div style="margin-top: 1.5mm; width: 49mm; text-align: center;">หัวหน้าหน่วยพัสดุ</div>
         <div style="margin-top: 1.5mm;">วันที่ ${day ? day : '........'} เดือน ${month ? month : '................'} พ.ศ. ${year ? year : '............'}</div>
       </div>
@@ -3442,12 +3766,12 @@ function printOutboundRequisitionDocument(t, meta = {}) {
 
     <div style="display: flex; justify-content: space-between; align-items: flex-start;">
       <div style="width: 48%; text-align: left; padding-left: 2mm;">
-        <div>.................................................. ผู้รับ</div>
-        <div style="margin-top: 1.5mm;">(${meta.signerReceiver ? ` ${esc(toThaiNum(meta.signerReceiver))} ` : '....................................................'})</div>
+        <div><span style="display: inline-block; width: 49mm; text-align: center;">..................................................</span> ผู้รับ</div>
+        <div style="margin-top: 1.5mm; width: 49mm; text-align: center;">(${meta.signerReceiver ? ` ${esc(toThaiNum(meta.signerReceiver))} ` : '..................................................'})</div>
       </div>
       <div style="width: 48%; text-align: left; padding-left: 5mm;">
-        <div>......................................................ผู้จ่าย</div>
-        <div style="margin-top: 1.5mm;">(${meta.signerIssuer ? ` ${esc(toThaiNum(meta.signerIssuer))} ` : '......................................................'})</div>
+        <div><span style="display: inline-block; width: 49mm; text-align: center;">..................................................</span> ผู้จ่าย</div>
+        <div style="margin-top: 1.5mm; width: 49mm; text-align: center;">(${meta.signerIssuer ? ` ${esc(toThaiNum(meta.signerIssuer))} ` : '..................................................'})</div>
       </div>
     </div>
   </div>

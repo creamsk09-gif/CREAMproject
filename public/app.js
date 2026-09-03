@@ -1716,6 +1716,240 @@ function printThankYouDocument(t) {
   prepareOfficialPrintWindow(printWindow);
 }
 
+function printGoodsReceiptDocument(t) {
+  const isInbound = t.type === 'inbound';
+  const docTitle = isInbound ? 'ใบตรวจรับยาและเวชภัณฑ์ (ใบรับของ)' : 'ใบส่งมอบยาและเวชภัณฑ์ (ใบจ่ายของ)';
+  const printWindow = window.open('', '_blank');
+  if (!printWindow) {
+    alert('กรุณาอนุญาตป๊อปอัป (Popup) เพื่อพิมพ์เอกสาร');
+    return;
+  }
+
+  const totalQty = t.items.reduce((sum, line) => sum + Number(line.qty || 0), 0);
+  const itemsRows = t.items.map((line, idx) => `
+    <tr>
+      <td style="text-align:center;">${idx + 1}</td>
+      <td>
+        <strong>${esc(line.item?.name || line.itemId)}</strong>
+        ${line.item?.code ? `<br><small style="color:#555;">รหัส: ${esc(line.item.code)}</small>` : ''}
+      </td>
+      <td style="text-align:center;">${esc(line.lot || '-')}</td>
+      <td style="text-align:center;">${fdate(line.expiry)}</td>
+      <td style="text-align:right;"><strong>${fmt.format(line.qty)}</strong></td>
+      <td style="text-align:center;">${esc(line.item?.unit || 'หน่วย')}</td>
+    </tr>
+  `).join('');
+
+  const html = `
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <title>${esc(docTitle)} - ${esc(t.refNo)}</title>
+  <style>
+    ${officialDocumentFontCss()}
+    @page { size: A4 portrait; margin: 20mm 20mm 20mm 20mm; }
+    * { box-sizing: border-box; }
+    html { background: #e5e7eb; }
+    body {
+      font-family: 'TH Sarabun New', sans-serif;
+      font-size: 16pt;
+      line-height: 1.25;
+      color: #000;
+      background: #fff;
+      margin: 0;
+      min-height: 257mm;
+    }
+    .doc-header {
+      text-align: center;
+      margin-bottom: 5mm;
+      border-bottom: 2pt double #000;
+      padding-bottom: 3mm;
+    }
+    .doc-header h1 {
+      margin: 0 0 2mm 0;
+      font-size: 20pt;
+      font-weight: bold;
+    }
+    .doc-header p {
+      margin: 0;
+      font-size: 16pt;
+      color: #333;
+    }
+    .meta-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 4mm 0 6mm 0;
+      font-size: 16pt;
+    }
+    .meta-table td {
+      padding: 1.5mm 2mm;
+      vertical-align: top;
+    }
+    .meta-label {
+      font-weight: bold;
+      width: 140px;
+    }
+    table.data-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 4mm 0;
+      font-size: 16pt;
+    }
+    table.data-table th, table.data-table td {
+      border: 1pt solid #000;
+      padding: 1.5mm 2.5mm;
+      line-height: 1.15;
+    }
+    table.data-table th {
+      background: #f1f5f9;
+      text-align: center;
+      font-weight: bold;
+    }
+    table.data-table tfoot td {
+      font-weight: bold;
+      background: #fafafa;
+    }
+    table.data-table thead { display: table-header-group; }
+    table.data-table tr { page-break-inside: avoid; }
+    .cert-text {
+      margin: 6mm 0 8mm 0;
+      text-indent: 1.5cm;
+      text-align: justify;
+      font-size: 16pt;
+    }
+    .sign-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 5mm;
+      margin-top: 8mm;
+      text-align: center;
+      page-break-inside: avoid;
+    }
+    .sign-card {
+      padding: 2mm;
+    }
+    .sign-line {
+      margin: 12mm 0 2mm 0;
+      display: inline-block;
+      width: 80%;
+      border-bottom: 1pt dotted #000;
+    }
+    .no-print-bar {
+      background: #f1f5f9;
+      padding: 12px;
+      text-align: center;
+      border-bottom: 1px solid #cbd5e1;
+      margin-bottom: 20px;
+    }
+    .print-btn {
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      padding: 8px 22px;
+      font-size: 15px;
+      font-weight: bold;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .print-btn:disabled { opacity: .55; cursor: wait; }
+    @media screen {
+      body { width: 210mm; margin: 12mm auto; padding: 20mm 20mm 20mm 20mm; box-shadow: 0 12px 36px rgba(15,23,42,.18); }
+      .no-print-bar { margin: -20mm -20mm 10mm -20mm; }
+    }
+    @media print {
+      .no-print-bar { display: none !important; }
+      html, body { background: #fff !important; }
+      body { width: auto; min-height: 0; padding: 0 !important; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+    }
+  </style>
+</head>
+<body>
+  <div class="no-print-bar">
+    <button class="print-btn" id="print-document-btn" data-ready-label="พิมพ์ / บันทึกเป็น PDF" disabled>กำลังเตรียมฟอนต์ TH Sarabun New...</button>
+  </div>
+
+  <div class="doc-header">
+    <h1>${esc(docTitle)}</h1>
+    <p>กลุ่มงานเภสัชกรรมและคุ้มครองผู้บริโภค สำนักงานสาธารณสุขจังหวัดศรีสะเกษ</p>
+  </div>
+
+  <table class="meta-table">
+    <tr>
+      <td class="meta-label">เลขที่เอกสาร:</td>
+      <td style="width: 40%;"><strong>${esc(t.refNo)}</strong></td>
+      <td class="meta-label">วันที่:</td>
+      <td><strong>${thaiFullDate(t.date)}</strong></td>
+    </tr>
+    <tr>
+      <td class="meta-label">${isInbound ? 'ผู้ส่งมอบ / แหล่งที่มา:' : 'หน่วยงานผู้เบิก:'}</td>
+      <td colspan="3"><strong>${esc(t.facility)}</strong></td>
+    </tr>
+    ${t.note ? `
+    <tr>
+      <td class="meta-label">หมายเหตุ:</td>
+      <td colspan="3">${esc(t.note)}</td>
+    </tr>` : ''}
+  </table>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th style="width: 40px;">ลำดับ</th>
+        <th>รายการยา / เวชภัณฑ์</th>
+        <th style="width: 110px;">ล็อต (Lot)</th>
+        <th style="width: 105px;">วันหมดอายุ</th>
+        <th style="width: 95px;">จำนวน</th>
+        <th style="width: 75px;">หน่วย</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${itemsRows}
+    </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="4" style="text-align: center;"><strong>รวมทั้งสิ้น ${fmt.format(t.items.length)} รายการ</strong></td>
+        <td style="text-align: right;"><strong>${fmt.format(totalQty)}</strong></td>
+        <td style="text-align: center;"><strong>หน่วย</strong></td>
+      </tr>
+    </tfoot>
+  </table>
+
+  <p class="cert-text">
+    ${isInbound
+      ? 'ได้ทำการตรวจสอบและตรวจรับยา/เวชภัณฑ์ตามรายการข้างต้น ครบถ้วนถูกต้องตามจำนวนและอยู่ในสภาพสมบูรณ์เรียบร้อยแล้ว จึงได้ลงนามไว้เป็นหลักฐาน'
+      : 'ได้ทำการส่งมอบยา/เวชภัณฑ์ตามรายการข้างต้น ครบถ้วนถูกต้องตามจำนวนและอยู่ในสภาพสมบูรณ์เรียบร้อยแล้ว จึงได้ลงนามไว้เป็นหลักฐาน'}
+  </p>
+
+  <div class="sign-grid">
+    <div class="sign-card">
+      <p><strong>${isInbound ? 'ผู้ส่งมอบ' : 'ผู้รับมอบ / ผู้เบิก'}</strong></p>
+      <span class="sign-line"></span>
+      <p>(........................................................)</p>
+      <p>วันที่ ......./......./...........</p>
+    </div>
+    <div class="sign-card">
+      <p><strong>${isInbound ? 'ผู้รับของ (เจ้าหน้าที่คลัง)' : 'ผู้จ่ายของ (เจ้าหน้าที่คลัง)'}</strong></p>
+      <span class="sign-line"></span>
+      <p>(........................................................)</p>
+      <p>วันที่ ......./......./...........</p>
+    </div>
+    <div class="sign-card">
+      <p><strong>ผู้ตรวจรับ (เภสัชกร)</strong></p>
+      <span class="sign-line"></span>
+      <p>(........................................................)</p>
+      <p>วันที่ ......./......./...........</p>
+    </div>
+  </div>
+</body>
+</html>`;
+
+  printWindow.document.open();
+  printWindow.document.write(html);
+  printWindow.document.close();
+  prepareOfficialPrintWindow(printWindow);
+}
+
 function openBillPreviewModal(att, refNo) {
   if (!att || !att.data) return;
   const isPdf = (att.type && att.type.includes('pdf')) || att.data.startsWith('data:application/pdf');
@@ -1826,8 +2060,9 @@ async function openTransactionDetail(txnId, pageType) {
             </div>
           </div>
           <div class="modal-foot" style="display:flex;justify-content:space-between;align-items:center;">
-            <div style="display:flex;gap:8px;align-items:center;">
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
               ${isInbound ? `<button class="button thankyou-btn" type="button" id="print-thankyou-btn">${icon('award')} พิมพ์หนังสือขอบคุณ</button>` : ''}
+              <button class="button receipt-btn" type="button" id="print-receipt-btn">${icon('file')} ${isInbound ? 'พิมพ์ใบรับของ' : 'พิมพ์ใบจ่ายของ'}</button>
             </div>
             <div style="display:flex;gap:8px;align-items:center;">
               ${!isVoided ? `<button class="button danger" type="button" id="void-txn-btn">${icon('ban')} ยกเลิกเอกสารนี้</button>` : ''}
@@ -1879,6 +2114,11 @@ async function openTransactionDetail(txnId, pageType) {
       // Print Thank You Button
       $('#print-thankyou-btn', modal)?.addEventListener('click', () => {
         printThankYouDocument(t);
+      });
+
+      // Print Goods Receipt / Delivery Note Button
+      $('#print-receipt-btn', modal)?.addEventListener('click', () => {
+        printGoodsReceiptDocument(t);
       });
 
       // Void Transaction

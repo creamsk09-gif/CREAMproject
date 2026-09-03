@@ -760,6 +760,19 @@ tr.row-clickable:hover td {
 .thankyou-btn:hover {
   background: #047857 !important;
 }
+.receipt-btn {
+  background: #2563eb !important;
+  color: #fff !important;
+  border: none !important;
+  border-radius: 8px !important;
+  padding: 8px 16px !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25) !important;
+}
+.receipt-btn:hover {
+  background: #1d4ed8 !important;
+}
 
 /* ── Printable Official Document Paper Styles ── */
 .gov-print-sheet {

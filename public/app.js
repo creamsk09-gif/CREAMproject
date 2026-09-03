@@ -2157,27 +2157,16 @@ function printGoodsReceiptDocument(t, meta = {}) {
   const month = thMonths[d.getMonth()];
   const year = d.getFullYear() + 543;
 
-  const minRows = Math.max(7, t.items.length);
   let rowsHtml = '';
-  for (let i = 0; i < minRows; i++) {
+  for (let i = 0; i < t.items.length; i++) {
     const line = t.items[i];
-    if (line) {
-      rowsHtml += `
-        <tr>
-          <td style="text-align: center; height: 9mm;">${toThaiNum(i + 1)}</td>
-          <td style="padding: 1.5mm 3mm; text-align: left;">${toThaiNum(esc(line.item?.name || line.itemId))}</td>
-          <td style="text-align: center;">${toThaiNum(esc(line.item?.unit || 'หน่วย'))}</td>
-          <td style="text-align: center;">${toThaiNum(fmt.format(line.qty))}</td>
-        </tr>`;
-    } else {
-      rowsHtml += `
-        <tr>
-          <td style="text-align: center; height: 9mm;">${toThaiNum(i + 1)}</td>
-          <td></td>
-          <td></td>
-          <td></td>
-        </tr>`;
-    }
+    rowsHtml += `
+      <tr>
+        <td style="text-align: center; height: 9mm;">${toThaiNum(i + 1)}</td>
+        <td style="padding: 1.5mm 3mm; text-align: left;">${esc(toThaiNum(line.item?.name || line.itemId))}</td>
+        <td style="text-align: center;">${esc(toThaiNum(line.item?.unit || 'หน่วย'))}</td>
+        <td style="text-align: center;">${toThaiNum(fmt.format(line.qty))}</td>
+      </tr>`;
   }
 
   const html = `
@@ -2185,7 +2174,7 @@ function printGoodsReceiptDocument(t, meta = {}) {
 <html lang="th">
 <head>
   <meta charset="UTF-8">
-  <title>${esc(docTitle)} - ${toThaiNum(esc(t.refNo))}</title>
+  <title>${esc(docTitle)} - ${esc(toThaiNum(t.refNo))}</title>
   <style>
     ${officialDocumentFontCss()}
     @page {
@@ -2356,9 +2345,9 @@ function printGoodsReceiptDocument(t, meta = {}) {
   </div>
 
   <div class="donor-info-block">
-    <div class="donor-info-row"><span class="donor-label">ชื่อผู้สนับสนุน/บริจาค</span> ${toThaiNum(esc(meta.donorName || t.facility || ''))}</div>
-    <div class="donor-info-row"><span class="donor-label">ที่อยู่ที่สามารถติดต่อได้</span> ${toThaiNum(esc(meta.donorAddress || '—'))}</div>
-    <div class="donor-info-row"><span class="donor-label">หมายเลขโทรศัพท์</span> ${toThaiNum(esc(formatPhone(meta.donorPhone) || '—'))}</div>
+    <div class="donor-info-row"><span class="donor-label">ชื่อผู้สนับสนุน/บริจาค</span> ${esc(toThaiNum(meta.donorName || t.facility || ''))}</div>
+    <div class="donor-info-row"><span class="donor-label">ที่อยู่ที่สามารถติดต่อได้</span> ${esc(toThaiNum(meta.donorAddress || '—'))}</div>
+    <div class="donor-info-row"><span class="donor-label">หมายเลขโทรศัพท์</span> ${esc(toThaiNum(formatPhone(meta.donorPhone) || '—'))}</div>
   </div>
 
   <table class="data-table">
@@ -2391,9 +2380,9 @@ function printGoodsReceiptDocument(t, meta = {}) {
           <span class="sign-role-label">ผู้ตรวจสอบก่อนส่งมอบ</span>
         </div>
         <div class="sign-name-wrap">
-          <div class="sign-name-sub">( ${toThaiNum(esc(meta.checkerSendName ? meta.checkerSendName : '...................................................'))} )</div>
+          <div class="sign-name-sub">( ${esc(toThaiNum(meta.checkerSendName ? meta.checkerSendName : '...................................................'))} )</div>
         </div>
-        <div class="sign-pos-sub">ตำแหน่ง ${toThaiNum(esc(meta.checkerSendPos ? meta.checkerSendPos : '...................................................'))}</div>
+        <div class="sign-pos-sub">ตำแหน่ง ${esc(toThaiNum(meta.checkerSendPos ? meta.checkerSendPos : '...................................................'))}</div>
       </td>
       <td>
         <div class="sign-line-box">
@@ -2402,9 +2391,9 @@ function printGoodsReceiptDocument(t, meta = {}) {
           <span class="sign-role-label">ผู้ตรวจสอบก่อนรับ</span>
         </div>
         <div class="sign-name-wrap">
-          <div class="sign-name-sub">( ${toThaiNum(esc(meta.checkerRecvName ? meta.checkerRecvName : '...................................................'))} )</div>
+          <div class="sign-name-sub">( ${esc(toThaiNum(meta.checkerRecvName ? meta.checkerRecvName : '...................................................'))} )</div>
         </div>
-        <div class="sign-pos-sub">ตำแหน่ง ${toThaiNum(esc(meta.checkerRecvPos ? meta.checkerRecvPos : '...................................................'))}</div>
+        <div class="sign-pos-sub">ตำแหน่ง ${esc(toThaiNum(meta.checkerRecvPos ? meta.checkerRecvPos : '...................................................'))}</div>
       </td>
     </tr>
     <tr>
@@ -2415,9 +2404,9 @@ function printGoodsReceiptDocument(t, meta = {}) {
           <span class="sign-role-label">ผู้ส่งมอบ</span>
         </div>
         <div class="sign-name-wrap">
-          <div class="sign-name-sub">( ${toThaiNum(esc(meta.senderName ? meta.senderName : '...................................................'))} )</div>
+          <div class="sign-name-sub">( ${esc(toThaiNum(meta.senderName ? meta.senderName : '...................................................'))} )</div>
         </div>
-        <div class="sign-pos-sub">ตำแหน่ง ${toThaiNum(esc(meta.senderPos ? meta.senderPos : '...................................................'))}</div>
+        <div class="sign-pos-sub">ตำแหน่ง ${esc(toThaiNum(meta.senderPos ? meta.senderPos : '...................................................'))}</div>
       </td>
       <td style="padding-top: 6mm;">
         <div class="sign-line-box">
@@ -2426,9 +2415,9 @@ function printGoodsReceiptDocument(t, meta = {}) {
           <span class="sign-role-label">ผู้รับ</span>
         </div>
         <div class="sign-name-wrap">
-          <div class="sign-name-sub">( ${toThaiNum(esc(meta.receiverName ? meta.receiverName : '...................................................'))} )</div>
+          <div class="sign-name-sub">( ${esc(toThaiNum(meta.receiverName ? meta.receiverName : '...................................................'))} )</div>
         </div>
-        <div class="sign-pos-sub">ตำแหน่ง ${toThaiNum(esc(meta.receiverPos ? meta.receiverPos : '...................................................'))}</div>
+        <div class="sign-pos-sub">ตำแหน่ง ${esc(toThaiNum(meta.receiverPos ? meta.receiverPos : '...................................................'))}</div>
       </td>
     </tr>
   </table>

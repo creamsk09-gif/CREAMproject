@@ -997,7 +997,7 @@ async function transactionPage(type) {
               <button type="button" class="manage-btn-pill" id="manage-facilities-btn">${icon('gear')} จัดการ</button>
             </div>
             <input class="control" name="facility" id="tx-facility" list="facilities-list" required placeholder="ระบุหรือเลือกหน่วยงาน">
-            <datalist id="facilities-list">${d.facilities.map(x => `<option value="${esc(x)}">`).join('')}</datalist>
+            <datalist id="facilities-list">${(d.facilities || []).map(x => `<option value="${esc(typeof x === 'string' ? x : (x.name || ''))}">`).join('')}</datalist>
           </label>
           <label class="field compact">
             <span>วันที่ทำรายการ <b class="required">*</b></span>

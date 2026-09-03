@@ -2393,22 +2393,19 @@ function printThankYouDocument(t, meta) {
 }
 
 function getSignatories() {
-  const defaultList = [
-    { id: '1', name: 'นางสาวมัลลิกา สุพล', position: 'หัวหน้ากลุ่มงานคุ้มครองผู้บริโภคและเภสัชสาธารณสุข', note: '' }
-  ];
   try {
-    const raw = localStorage.getItem('ssk_personnel_list_v2');
-    if (raw) {
+    const raw = localStorage.getItem('ssk_personnel_list_v4');
+    if (raw !== null) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length) return parsed;
+      if (Array.isArray(parsed)) return parsed;
     }
   } catch (e) {}
-  return defaultList;
+  return [];
 }
 
 function saveSignatories(list) {
   try {
-    localStorage.setItem('ssk_personnel_list_v2', JSON.stringify(list));
+    localStorage.setItem('ssk_personnel_list_v4', JSON.stringify(list));
   } catch (e) {}
 }
 
@@ -2421,7 +2418,7 @@ function openManageSignatoriesModal(onChanged) {
       <div class="personnel-item">
         <div>
           <strong>${esc(p.name)}</strong>
-          <small>${esc(p.position || 'ไม่ระบุตำแหน่ง')}${p.note ? ` · <span style="color:var(--primary);">${esc(p.note)}</span>` : ''}</small>
+          <small>${esc(p.position || 'ไม่ระบุตำแหน่ง')}</small>
         </div>
         <button type="button" class="icon-button danger btn-del-person" data-index="${idx}" title="ลบรายชื่อ" aria-label="ลบรายชื่อ">${icon('close')}</button>
       </div>
@@ -2446,7 +2443,7 @@ function openManageSignatoriesModal(onChanged) {
         </div>
         <div class="modal-body">
           <p style="font-size:12px;color:var(--muted);margin-bottom:14px;">เพิ่มหรือลบรายชื่อบุคลากรเพื่อใช้เลือกเป็นผู้ลงนามในเอกสารราชการต่างๆ</p>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+          <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;margin-bottom:14px;">
             <label class="field compact" style="margin:0;">
               <span>ชื่อ-นามสกุล <b class="required">*</b></span>
               <input class="control" id="new-person-name" placeholder="เช่น ภก.สมชาย ใจดี">
@@ -2454,12 +2451,6 @@ function openManageSignatoriesModal(onChanged) {
             <label class="field compact" style="margin:0;">
               <span>ตำแหน่ง <b class="required">*</b></span>
               <input class="control" id="new-person-pos" placeholder="เช่น เภสัชกรชำนาญการ">
-            </label>
-          </div>
-          <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end;margin-bottom:14px;">
-            <label class="field compact" style="margin:0;">
-              <span>หมายเหตุ (เช่น ปฏิบัติราชการแทน/แทน)</span>
-              <input class="control" id="new-person-note" value="แทน หัวหน้ากลุ่มงานคุ้มครองผู้บริโภคและเภสัชสาธารณสุข" placeholder="เช่น แทน หัวหน้ากลุ่มงานคุ้มครองผู้บริโภคและเภสัชสาธารณสุข">
             </label>
             <button type="button" class="button primary small" id="btn-add-person" style="height:42px;">${icon('plus')} เพิ่ม</button>
           </div>
@@ -2475,22 +2466,493 @@ function openManageSignatoriesModal(onChanged) {
     renderList();
     const nameInp = $('#new-person-name', modal);
     const posInp = $('#new-person-pos', modal);
-    const noteInp = $('#new-person-note', modal);
     $('#btn-add-person', modal)?.addEventListener('click', () => {
       const name = nameInp.value.trim();
       const pos = posInp.value.trim();
-      const note = noteInp ? noteInp.value.trim() : '';
       if (!name) return toast('กรุณาระบุชื่อ-นามสกุล', 'error');
-      list.push({ id: 'p-' + Date.now(), name, position: pos, note });
+      list.push({ id: 'p-' + Date.now(), name, position: pos });
       saveSignatories(list);
       nameInp.value = '';
       posInp.value = '';
-      if (noteInp) noteInp.value = 'แทน หัวหน้ากลุ่มงานคุ้มครองผู้บริโภคและเภสัชสาธารณสุข';
       renderList();
       if (typeof onChanged === 'function') onChanged(list);
       toast(`เพิ่มรายชื่อ "${name}" เรียบร้อย`);
     });
   });
+}
+
+async function openOutboundRequisitionPromptModal(t) {
+  let personnel = getSignatories();
+
+  function renderDatalist() {
+    return `<datalist id="signatories-req-name-list">
+      ${personnel.map(p => `<option value="${esc(p.name)}">`).join('')}
+    </datalist>`;
+  }
+
+  const items = t.items || [];
+  const itemsInputsHtml = items.map((line, idx) => {
+    const itemName = line.item?.name || line.itemId || 'รายการ';
+    const qty = Number(line.qty) || 0;
+    const unit = line.item?.unit || 'หน่วย';
+    return `
+      <div class="requisition-item-price-row" style="display:grid;grid-template-columns:2fr 1fr 1.2fr 1.2fr;gap:10px;align-items:center;padding:8px 10px;background:#fff;border-radius:6px;border:1px solid #e2e8f0;">
+        <div>
+          <strong style="font-size:13px;display:block;color:var(--heading);">${idx + 1}. ${esc(itemName)}</strong>
+          <small style="color:var(--muted);font-size:11px;">ล็อต: ${esc(line.lot || '-')} | หมดอายุ: ${line.expiry ? fdate(line.expiry) : '-'}</small>
+        </div>
+        <div style="font-size:13px;text-align:center;">
+          <span class="req-item-qty" data-qty="${qty}"><strong>${fmt.format(qty)}</strong> ${esc(unit)}</span>
+        </div>
+        <div>
+          <input class="control req-item-price-input" type="number" step="0.01" min="0" data-idx="${idx}" placeholder="ราคา/หน่วย (บาท)" style="font-size:13px;padding:6px 8px;">
+        </div>
+        <div style="font-size:13px;text-align:right;font-weight:600;color:var(--heading);">
+          <span class="req-item-total" data-idx="${idx}">-</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  const html = `
+    <div class="modal-backdrop" role="presentation">
+      <div class="modal" style="width:min(780px, 96vw);" role="dialog" aria-modal="true" aria-labelledby="requisition-prompt-title">
+        <div class="modal-head">
+          <div>
+            <h2 id="requisition-prompt-title">${icon('file')} จัดทำใบเบิกของ</h2>
+            <p style="font-size:12px;color:var(--muted);margin-top:2px;">เอกสาร ${esc(t.refNo || '-')} · กรอกข้อมูลเพิ่มเติมสำหรับพิมพ์ใบเบิกพัสดุราชการ</p>
+          </div>
+          <button class="icon-button" type="button" data-close aria-label="ปิด">${icon('close')}</button>
+        </div>
+        <form id="requisition-prompt-form">
+          <div class="modal-body" style="display:grid;gap:14px;max-height:calc(85vh - 120px);overflow-y:auto;padding:16px 20px;">
+            
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;">
+              <span style="font-size:13px;font-weight:700;color:var(--heading);display:block;margin-bottom:10px;">📋 ข้อมูลทั่วไปของใบเบิก</span>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                <label class="field compact" style="margin:0;">
+                  <span style="font-weight:600;">วันที่ในใบเบิก <b class="required">*</b></span>
+                  <input class="control" type="date" name="docDate" value="${t.date ? t.date.slice(0, 10) : today()}" required>
+                </label>
+                <label class="field compact" style="margin:0;">
+                  <span style="font-weight:600;">กลุ่มงาน/หน่วยงาน (ชื่อผู้เบิก)</span>
+                  <input class="control" name="requester" value="" placeholder="เช่น กลุ่มงานคุ้มครองผู้บริโภค / กลุ่มงานคบส.">
+                </label>
+              </div>
+
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px;">
+                <label class="field compact" style="margin:0;">
+                  <span style="font-weight:600;">เพื่อนำไปใช้ที่ (สถานที่บริจาค)</span>
+                  <input class="control" name="targetLocation" value="ศูนย์พักพิง" placeholder="เช่น ศูนย์พักพิง / รพ.สต. ...">
+                </label>
+                <label class="field compact" style="margin:0;">
+                  <span style="font-weight:600;">งาน (ฝ่ายงานผู้เบิก)</span>
+                  <input class="control" name="requesterDept" value="คุ้มครองผู้บริโภคและเภสัชสาธารณสุข" placeholder="เช่น คุ้มครองผู้บริโภคและเภสัชสาธารณสุข">
+                </label>
+              </div>
+
+              <div style="margin-top:10px;">
+                <span style="font-size:12px;font-weight:600;display:block;margin-bottom:6px;">ขอเบิก (เลือกได้มากกว่า 1 หรือไม่เลือกก็ได้):</span>
+                <div style="display:flex;gap:18px;align-items:center;font-size:14px;">
+                  <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+                    <input type="checkbox" name="reqCategory" value="ยา"> ยา
+                  </label>
+                  <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+                    <input type="checkbox" name="reqCategory" value="เวชภัณฑ์" checked> เวชภัณฑ์
+                  </label>
+                  <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+                    <input type="checkbox" name="reqCategory" value="วัสดุ"> วัสดุ
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <!-- Item Prices -->
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <span style="font-size:13px;font-weight:700;color:var(--heading);">💰 ราคาสินค้าต่อหน่วย (ไม่บังคับ - คำนวณราคารวมอัตโนมัติ)</span>
+                <small style="color:var(--muted);font-size:11px;">*หากไม่ระบุราคา ระบบจะแสดงผลรวมราคารวมเป็น ๐</small>
+              </div>
+              <div style="display:grid;gap:8px;">
+                ${itemsInputsHtml}
+              </div>
+              <div style="display:flex;justify-content:flex-end;align-items:center;margin-top:10px;padding-top:8px;border-top:1px dashed #cbd5e1;font-size:14px;font-weight:700;">
+                <span>รวมเป็นเงินทั้งสิ้น: <strong id="req-modal-grand-total" style="color:var(--primary);font-size:16px;">0</strong> บาท</span>
+              </div>
+            </div>
+
+            <!-- Signatures Section -->
+            <div class="signatories-box">
+              <div class="signatories-head">
+                <h3>${icon('award')} ข้อมูลผู้ลงนาม (4 ตำแหน่ง)</h3>
+                <button type="button" class="manage-btn-pill" id="btn-manage-sign-req">${icon('gear')} จัดการรายชื่อ</button>
+              </div>
+              <div id="req-datalist-container">${renderDatalist()}</div>
+              
+              <div class="signatories-grid">
+                <div class="sign-role-card">
+                  <span class="role-title">1. ผู้ขอเบิก</span>
+                  <label class="field compact" style="margin:0;">
+                    <span>ชื่อ-นามสกุล</span>
+                    <input class="control sign-name-input" name="signerRequester" list="signatories-req-name-list" placeholder="พิมพ์หรือเลือกชื่อ...">
+                  </label>
+                </div>
+
+                <div class="sign-role-card">
+                  <span class="role-title">2. ผู้สั่งจ่าย (หัวหน้าหน่วยพัสดุ)</span>
+                  <label class="field compact" style="margin:0;">
+                    <span>ชื่อ-นามสกุล</span>
+                    <input class="control sign-name-input" name="signerApprover" list="signatories-req-name-list" placeholder="พิมพ์หรือเลือกชื่อ...">
+                  </label>
+                </div>
+
+                <div class="sign-role-card">
+                  <span class="role-title">3. ผู้รับ</span>
+                  <label class="field compact" style="margin:0;">
+                    <span>ชื่อ-นามสกุล</span>
+                    <input class="control sign-name-input" name="signerReceiver" list="signatories-req-name-list" placeholder="พิมพ์หรือเลือกชื่อ...">
+                  </label>
+                </div>
+
+                <div class="sign-role-card">
+                  <span class="role-title">4. ผู้จ่าย</span>
+                  <label class="field compact" style="margin:0;">
+                    <span>ชื่อ-นามสกุล</span>
+                    <input class="control sign-name-input" name="signerIssuer" list="signatories-req-name-list" placeholder="พิมพ์หรือเลือกชื่อ...">
+                  </label>
+                </div>
+              </div>
+            </div>
+
+          </div>
+          <div class="modal-foot" style="display:flex;justify-content:space-between;align-items:center;">
+            <button class="button secondary small" type="button" data-close>ยกเลิก</button>
+            <button class="button receipt-btn" type="submit">${icon('print')} ยืนยันและพิมพ์ใบเบิกของ</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+
+  openModal(html, modal => {
+    // Dynamic price calculation
+    const priceInputs = $$('.req-item-price-input', modal);
+    const totalSpans = $$('.req-item-total', modal);
+    const grandTotalEl = $('#req-modal-grand-total', modal);
+
+    function recalcTotals() {
+      let grandTotal = 0;
+      let hasAnyPrice = false;
+      priceInputs.forEach((inp, i) => {
+        const pVal = parseFloat(inp.value);
+        const qtyVal = parseFloat(inp.closest('.requisition-item-price-row')?.querySelector('.req-item-qty')?.dataset.qty || 0);
+        if (!isNaN(pVal) && pVal > 0) {
+          hasAnyPrice = true;
+          const lineTotal = pVal * qtyVal;
+          grandTotal += lineTotal;
+          if (totalSpans[i]) totalSpans[i].textContent = `${fmt.format(lineTotal)} บาท`;
+        } else {
+          if (totalSpans[i]) totalSpans[i].textContent = '-';
+        }
+      });
+      if (grandTotalEl) {
+        grandTotalEl.textContent = hasAnyPrice ? fmt.format(grandTotal) : '0';
+      }
+    }
+
+    priceInputs.forEach(inp => {
+      inp.addEventListener('input', recalcTotals);
+    });
+
+    $('#btn-manage-sign-req', modal)?.addEventListener('click', () => {
+      openManageSignatoriesModal(updatedList => {
+        personnel = updatedList;
+        const dlContainer = $('#req-datalist-container', modal);
+        if (dlContainer) dlContainer.innerHTML = renderDatalist();
+      });
+    });
+
+    $('#requisition-prompt-form', modal)?.addEventListener('submit', e => {
+      e.preventDefault();
+      const fd = new FormData(e.currentTarget);
+      const itemPrices = [];
+      priceInputs.forEach(inp => {
+        const val = parseFloat(inp.value);
+        itemPrices.push(!isNaN(val) && val > 0 ? val : 0);
+      });
+
+      const meta = {
+        docDate: fd.get('docDate') || t.date,
+        requester: (fd.get('requester') || '').trim(),
+        targetLocation: (fd.get('targetLocation') || '').trim(),
+        requesterDept: (fd.get('requesterDept') || '').trim(),
+        selectedCategories: Array.from(fd.getAll('reqCategory')),
+        itemPrices: itemPrices,
+        signerRequester: (fd.get('signerRequester') || '').trim(),
+        signerApprover: (fd.get('signerApprover') || '').trim(),
+        signerReceiver: (fd.get('signerReceiver') || '').trim(),
+        signerIssuer: (fd.get('signerIssuer') || '').trim()
+      };
+      closeModal();
+      printOutboundRequisitionDocument(t, meta);
+    });
+  });
+}
+
+function printOutboundRequisitionDocument(t, meta = {}) {
+  const printWindow = window.open('', '_blank');
+  if (!printWindow) {
+    alert('กรุณาอนุญาตป๊อปอัป (Popup) เพื่อพิมพ์เอกสาร');
+    return;
+  }
+
+  const d = new Date(meta.docDate || t.date || today());
+  const thMonths = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+  const day = isNaN(d.getTime()) ? '' : toThaiNum(d.getDate());
+  const month = isNaN(d.getTime()) ? '' : thMonths[d.getMonth()];
+  const year = isNaN(d.getTime()) ? '' : toThaiNum(d.getFullYear() + 543);
+
+  const itemPrices = meta.itemPrices || [];
+  let grandTotal = 0;
+  let hasAnyPrice = false;
+  let rowsHtml = '';
+
+  for (let i = 0; i < (t.items || []).length; i++) {
+    const line = t.items[i];
+    const qty = Number(line.qty) || 0;
+    const unitPrice = itemPrices[i] > 0 ? itemPrices[i] : 0;
+    let pricePerUnitStr = '';
+    let totalPriceStr = '';
+
+    if (unitPrice > 0) {
+      hasAnyPrice = true;
+      const lineTotal = unitPrice * qty;
+      grandTotal += lineTotal;
+      pricePerUnitStr = toThaiNum(unitPrice.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+      totalPriceStr = toThaiNum(lineTotal.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+    }
+
+    rowsHtml += `
+      <tr>
+        <td style="text-align: center; height: 9mm;">${toThaiNum(i + 1)}</td>
+        <td style="padding: 1.5mm 3mm; text-align: left;">${esc(toThaiNum(line.item?.name || line.itemId))}</td>
+        <td style="text-align: center;">${toThaiNum(fmt.format(qty))}</td>
+        <td style="text-align: center;">${toThaiNum(fmt.format(qty))}</td>
+        <td style="text-align: center;">${esc(toThaiNum(line.item?.unit || 'หน่วย'))}</td>
+        <td style="text-align: right; padding-right: 3mm;">${pricePerUnitStr}</td>
+        <td style="text-align: right; padding-right: 3mm;">${totalPriceStr}</td>
+      </tr>`;
+  }
+
+  const grandTotalDisplay = hasAnyPrice
+    ? toThaiNum(grandTotal.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+    : '๐';
+
+  const cats = Array.isArray(meta.selectedCategories) ? meta.selectedCategories : [meta.categoryType || 'เวชภัณฑ์'];
+  const isDrug = cats.includes('ยา');
+  const isMedical = cats.includes('เวชภัณฑ์');
+  const isMaterial = cats.includes('วัสดุ');
+
+  const html = `
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <title>ใบเบิก - ${esc(toThaiNum(t.refNo))}</title>
+  <style>
+    ${officialDocumentFontCss()}
+    @page {
+      size: A4 portrait;
+      margin: 16mm 18mm 16mm 18mm;
+    }
+    * { box-sizing: border-box; }
+    html { background: #e5e7eb; }
+    body {
+      font-family: 'TH Sarabun New', Sarabun, sans-serif;
+      font-size: 16pt;
+      line-height: 1.25;
+      color: #000;
+      background: #fff;
+      margin: 0;
+      min-height: 265mm;
+    }
+    .doc-main-title {
+      text-align: center;
+      font-size: 22pt;
+      font-weight: bold;
+      margin: 0 0 2mm 0;
+    }
+    .doc-gov-head {
+      text-align: right;
+      font-size: 16pt;
+      line-height: 1.35;
+      margin-bottom: 4mm;
+    }
+    .req-info-block {
+      font-size: 16pt;
+      line-height: 1.45;
+      margin-bottom: 3mm;
+    }
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 3mm 0 2mm 0;
+      font-size: 16pt;
+    }
+    .data-table th, .data-table td {
+      border: 1pt solid #000;
+      line-height: 1.15;
+    }
+    .data-table th {
+      background: #fff;
+      text-align: center;
+      font-weight: bold;
+      padding: 2mm 1mm;
+    }
+    .data-table thead { display: table-header-group; }
+    .data-table tr { page-break-inside: avoid; }
+    .summary-section {
+      text-align: right;
+      font-size: 16pt;
+      line-height: 1.45;
+      margin: 4mm 0 6mm 0;
+    }
+    .sign-section {
+      margin-top: 6mm;
+      page-break-inside: avoid;
+      font-size: 15pt;
+      line-height: 1.45;
+    }
+    .no-print-bar {
+      background: #f1f5f9;
+      padding: 12px;
+      text-align: center;
+      border-bottom: 1px solid #cbd5e1;
+      margin-bottom: 20px;
+    }
+    .print-btn {
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      padding: 8px 24px;
+      font-size: 15px;
+      font-weight: bold;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .docx-btn {
+      background: #0f766e;
+      color: #fff;
+      border: none;
+      padding: 8px 24px;
+      font-size: 15px;
+      font-weight: bold;
+      border-radius: 6px;
+      cursor: pointer;
+      margin-left: 10px;
+    }
+    .docx-btn:hover { background: #0d5f58; }
+    .print-btn:disabled { opacity: .55; cursor: wait; }
+    @media screen {
+      body {
+        width: 210mm;
+        margin: 10mm auto;
+        padding: 16mm 18mm 16mm 18mm;
+        box-shadow: 0 10px 30px rgba(0,0,0,.15);
+      }
+      .no-print-bar { margin: -16mm -18mm 16mm -18mm; }
+    }
+    @media print {
+      .no-print-bar { display: none !important; }
+      html, body { background: #fff !important; }
+      body { width: auto; min-height: 0; padding: 0 !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="no-print-bar">
+    <button class="print-btn" id="print-document-btn" data-ready-label="พิมพ์ / บันทึกเป็น PDF" disabled>กำลังเตรียมฟอนต์ TH Sarabun New...</button>
+    <button class="print-btn docx-btn" id="download-docx-btn" type="button">พิมพ์ / บันทึกเป็น DOCX</button>
+  </div>
+
+  <div class="doc-main-title">ใบเบิก</div>
+
+  <div class="doc-gov-head">
+    <div>ส่วนราชการ สำนักงานสาธารณสุขจังหวัดศรีสะเกษ</div>
+    <div>วันที่ ${day ? day : '............'} เดือน ${month ? month : '............................'} พ.ศ. ${year ? year : '................'}</div>
+  </div>
+
+  <div class="req-info-block">
+    <div>กลุ่มงาน/หน่วยงาน &nbsp;${esc(toThaiNum(meta.requester || '................................................'))}</div>
+    <div style="margin-top: 1.5mm;">
+      ขอเบิก &nbsp;&nbsp;
+      ${isDrug ? '☑' : '□'} ยา &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+      ${isMedical ? '☑' : '□'} เวชภัณฑ์ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+      ${isMaterial ? '☑' : '□'} วัสดุ
+    </div>
+    <div style="margin-top: 1.5mm;">
+      เพื่อนำไปใช้ที่ &nbsp;${esc(toThaiNum(meta.targetLocation || '................................................'))} &nbsp;ดังรายการต่อไปนี้
+    </div>
+  </div>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th style="width: 7%; text-align: center;">ลำดับ</th>
+        <th style="width: 35%; text-align: center;">รายการ</th>
+        <th style="width: 12%; text-align: center;">จำนวน<br>ขอเบิก</th>
+        <th style="width: 12%; text-align: center;">จำนวน<br>ที่จ่าย</th>
+        <th style="width: 10%; text-align: center;">หน่วยนับ</th>
+        <th style="width: 12%; text-align: center;">ราคาต่อหน่วย</th>
+        <th style="width: 12%; text-align: center;">ราคารวม</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rowsHtml}
+    </tbody>
+  </table>
+
+  <div class="summary-section">
+    <div>รวมเบิกจ่าย จำนวน........${toThaiNum(t.items?.length || 0)}.......รายการ</div>
+    <div style="margin-top: 1.5mm;">รวมเป็นเงินทั้งสิ้น...........${grandTotalDisplay}.............บาท</div>
+  </div>
+
+  <div class="sign-section">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6mm;">
+      <div style="width: 48%; text-align: left; padding-left: 2mm;">
+        <div>.................................................. ผู้ขอเบิก</div>
+        <div style="margin-top: 1.5mm;">(${meta.signerRequester ? ` ${esc(toThaiNum(meta.signerRequester))} ` : '..................................................'})</div>
+        <div style="margin-top: 1.5mm;">งาน ${meta.requesterDept ? esc(toThaiNum(meta.requesterDept)) : '...............................................'}</div>
+      </div>
+      <div style="width: 48%; text-align: left; padding-left: 5mm;">
+        <div>..................................................... ผู้สั่งจ่าย</div>
+        <div style="margin-top: 1.5mm;">(${meta.signerApprover ? ` ${esc(toThaiNum(meta.signerApprover))} ` : '.....................................................'})</div>
+        <div style="margin-top: 1.5mm; width: 49mm; text-align: center;">หัวหน้าหน่วยพัสดุ</div>
+        <div style="margin-top: 1.5mm;">วันที่ ${day ? day : '........'} เดือน ${month ? month : '................'} พ.ศ. ${year ? year : '............'}</div>
+      </div>
+    </div>
+
+    <div style="text-align: left; margin: 4mm 0 6mm 0; font-size: 15pt;">
+      ได้รับของถูกต้องและครบถ้วนตามรายการเบิกจ่ายแล้ว
+    </div>
+
+    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+      <div style="width: 48%; text-align: left; padding-left: 2mm;">
+        <div>.................................................. ผู้รับ</div>
+        <div style="margin-top: 1.5mm;">(${meta.signerReceiver ? ` ${esc(toThaiNum(meta.signerReceiver))} ` : '....................................................'})</div>
+      </div>
+      <div style="width: 48%; text-align: left; padding-left: 5mm;">
+        <div>......................................................ผู้จ่าย</div>
+        <div style="margin-top: 1.5mm;">(${meta.signerIssuer ? ` ${esc(toThaiNum(meta.signerIssuer))} ` : '......................................................'})</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
+
+  printWindow.document.open();
+  printWindow.document.write(html);
+  printWindow.document.close();
+  prepareOfficialPrintWindow(printWindow, `ใบเบิก_${t.refNo || 'requisition'}.docx`);
 }
 
 async function openGoodsReceiptPromptModal(t) {
@@ -2502,7 +2964,7 @@ async function openGoodsReceiptPromptModal(t) {
   }
   let personnel = getSignatories();
   const isInbound = t.type === 'inbound';
-  const docTitle = isInbound ? 'พิมพ์ใบรับของ' : 'พิมพ์ใบจ่ายของ / ใบเบิกจ่าย';
+  const docTitle = isInbound ? 'พิมพ์ใบรับของ' : 'พิมพ์ใบเบิกของ';
 
   function getFacInfo() {
     const facObj = (state.facilities || []).find(f => {
@@ -3113,7 +3575,7 @@ async function openTransactionDetail(txnId, pageType) {
           <div class="modal-foot" style="display:flex;justify-content:space-between;align-items:center;">
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
               ${isInbound ? `<button class="button thankyou-btn" type="button" id="print-thankyou-btn">${icon('award')} พิมพ์หนังสือขอบคุณ</button>` : ''}
-              <button class="button receipt-btn" type="button" id="print-receipt-btn">${icon('file')} ${isInbound ? 'พิมพ์ใบรับของ' : 'พิมพ์ใบจ่ายของ'}</button>
+              <button class="button receipt-btn" type="button" id="print-receipt-btn">${icon('file')} ${isInbound ? 'พิมพ์ใบรับของ' : 'พิมพ์ใบเบิกของ'}</button>
             </div>
             <div style="display:flex;gap:8px;align-items:center;">
               ${!isVoided ? `<button class="button danger" type="button" id="void-txn-btn">${icon('ban')} ยกเลิกเอกสารนี้</button>` : ''}
@@ -3175,9 +3637,13 @@ async function openTransactionDetail(txnId, pageType) {
         openThankYouPromptModal(t);
       });
 
-      // Print Goods Receipt / Delivery Note Button (Opens Prompt Modal for Extra Info)
+      // Print Receipt / Requisition Note Button (Opens Prompt Modal for Extra Info)
       $('#print-receipt-btn', modal)?.addEventListener('click', () => {
-        openGoodsReceiptPromptModal(t);
+        if (isInbound) {
+          openGoodsReceiptPromptModal(t);
+        } else {
+          openOutboundRequisitionPromptModal(t);
+        }
       });
 
       // Void Transaction

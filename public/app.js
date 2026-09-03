@@ -1559,32 +1559,43 @@ function getItemLots(itemId) {
   if (!item) return [];
   const map = new Map();
 
-  // Add primary lot from item inventory
-  if (item.lot || item.expiry) {
-    map.set(item.lot || 'หลัก', {
-      lot: item.lot || '-',
-      expiry: item.expiry || null,
-      source: 'คงคลังปัจจุบัน'
+  // If item has lots populated from server
+  if (Array.isArray(item.lots)) {
+    item.lots.forEach(l => {
+      if (l.lot && l.lot !== '-') map.set(l.lot, { lot: l.lot, expiry: l.expiry || null, source: 'คงคลัง' });
     });
+  }
+
+  // Add primary lot from item inventory
+  if (item.lot) {
+    if (!map.has(item.lot)) {
+      map.set(item.lot, {
+        lot: item.lot,
+        expiry: item.expiry || null,
+        source: 'คงคลังปัจจุบัน'
+      });
+    }
   }
 
   // Find from recorded transactions
   (state.recentTransactions || []).forEach(tx => {
-    (tx.items || []).forEach(line => {
-      const matchId = line.itemId || line.item?.id;
-      if (matchId === itemId && line.lot) {
-        if (!map.has(line.lot)) {
-          map.set(line.lot, {
-            lot: line.lot,
-            expiry: line.expiry || null,
-            source: tx.type === 'inbound' ? 'รับเข้า' : 'รายการก่อนหน้า'
-          });
+    if (tx.status !== 'voided') {
+      (tx.items || []).forEach(line => {
+        const matchId = line.itemId || line.item?.id;
+        if (matchId === itemId && line.lot) {
+          if (!map.has(line.lot)) {
+            map.set(line.lot, {
+              lot: line.lot,
+              expiry: line.expiry || null,
+              source: tx.type === 'inbound' ? 'รับเข้า' : 'รายการก่อนหน้า'
+            });
+          }
         }
-      }
-    });
+      });
+    }
   });
 
-  const lots = Array.from(map.values());
+  const lots = Array.from(map.values()).filter(l => l.lot && l.lot !== '-');
 
   // Sort by FEFO (First Expired, First Out): earliest expiry first
   lots.sort((a, b) => {
@@ -4709,7 +4720,18 @@ function renderStockTable(items, meta, onPageChange) {
           </tr>
         </thead>
         <tbody>
-          ${items.length ? items.map(i => `
+          ${items.length ? items.map(i => {
+            const lots = i.lots || (i.lot ? [{ lot: i.lot, expiry: i.expiry }] : []);
+            const uniqueLots = [...new Set(lots.map(l => l.lot).filter(Boolean))];
+            const lotDisplay = uniqueLots.length > 1
+              ? `<div><strong style="color:var(--heading);">${esc(uniqueLots.slice(0, 2).join(', '))}${uniqueLots.length > 2 ? '...' : ''}</strong><br><small style="color:var(--primary);font-weight:600;">(รวม ${uniqueLots.length} ล็อตในคลัง)</small></div>`
+              : `<strong>${esc(i.lot || '-')}</strong>`;
+            
+            const expDisplay = (uniqueLots.length > 1 && i.earliestExpiry)
+              ? `<div><strong style="color:${i.daysToExpiry <= 180 ? 'var(--red)' : 'inherit'};">${fdate(i.earliestExpiry)}</strong><br><small style="color:var(--muted);">${Number.isFinite(i.daysToExpiry) ? `${fmt.format(i.daysToExpiry)} วัน (เร็วสุด)` : 'เร็วสุด'}</small></div>`
+              : `<strong>${fdate(i.expiry)}</strong><small>${Number.isFinite(i.daysToExpiry) ? `${fmt.format(i.daysToExpiry)} วัน` : 'ไม่มีวันหมดอายุ'}</small>`;
+
+            return `
             <tr class="row-clickable" data-item-id="${i.id}">
               <td data-label="รายการ">
                 <div class="item-cell">
@@ -4718,12 +4740,13 @@ function renderStockTable(items, meta, onPageChange) {
                 </div>
               </td>
               <td data-label="หมวดหมู่">${esc(i.category)}</td>
-              <td data-label="ล็อต"><strong>${esc(i.lot || '-')}</strong></td>
-              <td data-label="วันหมดอายุ"><strong>${fdate(i.expiry)}</strong><small>${Number.isFinite(i.daysToExpiry) ? `${fmt.format(i.daysToExpiry)} วัน` : 'ไม่มีวันหมดอายุ'}</small></td>
+              <td data-label="ล็อต">${lotDisplay}</td>
+              <td data-label="วันหมดอายุ">${expDisplay}</td>
               <td data-label="จุดเตือน" class="number">${fmt.format(i.minQty)}</td>
               <td data-label="คงเหลือ" class="number"><span class="stock-number">${fmt.format(i.qty)}</span> ${esc(i.unit)}</td>
               <td data-label="สถานะ"><span class="status ${i.status}">${statusLabel(i.status)}</span></td>
-            </tr>`).join('') : `<tr><td colspan="7" class="table-empty">${icon('search')}<br>ไม่พบรายการที่ตรงกับตัวกรอง</td></tr>`}
+            </tr>`;
+          }).join('') : `<tr><td colspan="7" class="table-empty">${icon('search')}<br>ไม่พบรายการที่ตรงกับตัวกรอง</td></tr>`}
         </tbody>
       </table>
     </div>`;
@@ -4758,6 +4781,13 @@ async function openItemDetail(itemId) {
     const item = d.item;
     const txns = d.transactions || [];
 
+    const itemLots = item.lots || (item.lot ? [{ lot: item.lot, expiry: item.expiry }] : []);
+    const uniqueItemLots = [...new Set(itemLots.map(l => l.lot).filter(Boolean))];
+    const lotKpiSub = uniqueItemLots.length > 1 ? `รวม ${uniqueItemLots.length} ล็อตในคลัง` : esc(item.package || 'บรรจุภัณฑ์');
+    const lotKpiVal = uniqueItemLots.length ? uniqueItemLots.join(', ') : '-';
+    const expKpiVal = fdate(item.earliestExpiry || item.expiry);
+    const expKpiSub = Number.isFinite(item.daysToExpiry) ? `${item.daysToExpiry} วัน${uniqueItemLots.length > 1 ? ' (ล็อตเร็วสุด)' : ''}` : '-';
+
     const html = `
       <div class="modal-backdrop" role="presentation">
         <div class="modal modal-large" role="dialog" aria-modal="true" aria-labelledby="item-detail-title">
@@ -4772,15 +4802,15 @@ async function openItemDetail(itemId) {
             <div class="grid summary-grid">
               ${kpi('package', '', 'คงเหลือ', `${fmt.format(item.qty)} ${esc(item.unit)}`, `สถานะ: ${statusLabel(item.status)}`)}
               ${kpi('alert', item.qty <= item.minQty ? 'orange' : '', 'จุดเตือนสั่งซื้อ', fmt.format(item.minQty), 'หน่วยเตือน')}
-              ${kpi('clock', item.daysToExpiry <= 180 ? 'red' : '', 'วันหมดอายุ', fdate(item.expiry), `${Number.isFinite(item.daysToExpiry) ? `${item.daysToExpiry} วัน` : '-'}`)}
-              ${kpi('boxes', 'blue', 'ล็อต', esc(item.lot || '-'), esc(item.package || 'บรรจุภัณฑ์'))}
+              ${kpi('clock', item.daysToExpiry <= 180 ? 'red' : '', 'วันหมดอายุ', expKpiVal, expKpiSub)}
+              ${kpi('boxes', 'blue', 'ล็อต', esc(lotKpiVal), lotKpiSub)}
             </div>
             <div style="margin-top:20px;">
               <h3 style="font-size:15px;margin-bottom:10px;">ประวัติการเคลื่อนไหว (${txns.length} รายการ)</h3>
               ${txns.length ? `
                 <div class="table-wrap">
                   <table>
-                    <thead><tr><th>วันที่</th><th>ประเภท</th><th>เลขที่อ้างอิง</th><th>หน่วยงาน</th><th class="number">จำนวน</th></tr></thead>
+                    <thead><tr><th>วันที่</th><th>ประเภท</th><th>เลขที่อ้างอิง</th><th>หน่วยงาน</th><th>ล็อต</th><th>วันหมดอายุ</th><th class="number">จำนวน</th></tr></thead>
                     <tbody>
                       ${txns.map(t => {
                         const line = t.items.find(l => l.itemId === item.id) || {};
@@ -4790,6 +4820,8 @@ async function openItemDetail(itemId) {
                             <td><span class="status ${t.type === 'inbound' ? 'normal' : 'low'}">${t.type === 'inbound' ? 'รับเข้า' : 'เบิกจ่าย'}</span></td>
                             <td><strong>${esc(t.refNo)}</strong></td>
                             <td>${esc(t.facility)}</td>
+                            <td><strong style="color:var(--heading);">${esc(line.lot || '-')}</strong></td>
+                            <td>${line.expiry ? fdate(line.expiry) : '-'}</td>
                             <td class="number"><span class="stock-number">${fmt.format(line.qty || 0)}</span> ${esc(item.unit)}</td>
                           </tr>`;
                       }).join('')}

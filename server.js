@@ -281,7 +281,45 @@ function itemStatus(item) {
   return 'normal';
 }
 
-function enrich(item) { return { ...item, status: itemStatus(item), daysToExpiry: daysUntil(item.expiry) }; }
+function enrich(item, database = null) {
+  const map = new Map();
+  if (item.lot || item.expiry) {
+    map.set(item.lot || 'หลัก', { lot: item.lot || '-', expiry: item.expiry || null });
+  }
+  const txList = (database && typeof database === 'object' && Array.isArray(database.transactions))
+    ? database.transactions
+    : [];
+
+  txList.forEach(t => {
+    if (t.status !== 'voided' && t.items) {
+      t.items.forEach(line => {
+        if (line.itemId === item.id && line.lot) {
+          if (!map.has(line.lot)) {
+            map.set(line.lot, { lot: line.lot, expiry: line.expiry || null });
+          }
+        }
+      });
+    }
+  });
+
+  const lots = Array.from(map.values());
+  lots.sort((a, b) => {
+    if (!a.expiry && !b.expiry) return 0;
+    if (!a.expiry) return 1;
+    if (!b.expiry) return -1;
+    return a.expiry.localeCompare(b.expiry);
+  });
+
+  const earliestExpiry = (lots.find(l => l.expiry)?.expiry) || item.expiry;
+
+  return {
+    ...item,
+    lots,
+    earliestExpiry,
+    status: itemStatus({ ...item, expiry: earliestExpiry }),
+    daysToExpiry: daysUntil(earliestExpiry)
+  };
+}
 
 function enrichMapping(mapping, db) {
   const hospital = db.hospitalNetwork.find(h => h.id === mapping.hospitalId);
@@ -653,7 +691,7 @@ async function api(req, res, url) {
     if (req.method === 'GET') {
       if (!item) return error(res, 404, 'NOT_FOUND', 'ไม่พบรายการยาหรือเวชภัณฑ์');
       const relatedTransactions = db.transactions.filter(t => t.items && t.items.some(i => i.itemId === item.id)).sort((a, b) => b.date.localeCompare(a.date));
-      return json(res, 200, { item: enrich(item), transactions: relatedTransactions });
+      return json(res, 200, { item: enrich(item, db), transactions: relatedTransactions });
     }
 
     if (req.method === 'PUT') {
@@ -681,7 +719,7 @@ async function api(req, res, url) {
 
       db.audit.push({ id: `aud-${crypto.randomUUID()}`, action: 'UPDATE', entity: 'item', entityId: item.id, user: s.user.id, at: new Date().toISOString(), detail: `แก้ไขรายการ ${item.code} (${item.name})` });
       await writeDb(db);
-      return json(res, 200, { item: enrich(item) });
+      return json(res, 200, { item: enrich(item, db) });
     }
 
     if (req.method === 'DELETE') {
@@ -701,7 +739,7 @@ async function api(req, res, url) {
     const q = (url.searchParams.get('q') || '').trim().toLowerCase();
     const status = url.searchParams.get('status') || 'all';
     const category = url.searchParams.get('category') || 'all';
-    let rows = db.items.filter(i => i.active).map(enrich);
+    let rows = db.items.filter(i => i.active).map(i => enrich(i, db));
     if (q) rows = rows.filter(i => `${i.code} ${i.name} ${i.lot} ${i.location}`.toLowerCase().includes(q));
     if (status !== 'all') rows = rows.filter(i => i.status === status);
     if (category !== 'all') rows = rows.filter(i => i.category === category);
@@ -733,7 +771,7 @@ async function api(req, res, url) {
     db.items.push(item);
     db.audit.push({ id: `aud-${crypto.randomUUID()}`, action: 'CREATE', entity: 'item', entityId: item.id, user: s.user.id, at: new Date().toISOString(), detail: `สร้างรายการ ${item.code}` });
     await writeDb(db);
-    return json(res, 201, { item: enrich(item) });
+    return json(res, 201, { item: enrich(item, db) });
   }
 
   const txnVoidMatch = url.pathname.match(/^\/api\/transactions\/([^/]+)\/void$/);
@@ -794,7 +832,7 @@ async function api(req, res, url) {
     if (!txn) return error(res, 404, 'NOT_FOUND', 'ไม่พบเอกสารทำรายการ');
     const enrichedItems = txn.items.map(line => {
       const item = db.items.find(i => i.id === line.itemId);
-      return { ...line, item: item ? enrich(item) : null };
+      return { ...line, item: item ? enrich(item, db) : null };
     });
     return json(res, 200, { transaction: { ...txn, items: enrichedItems } });
   }

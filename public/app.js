@@ -2047,46 +2047,120 @@ function printMemoDocument(t, meta) {
   prepareOfficialPrintWindow(printWindow, `บันทึกข้อความ_${meta.memoNo || t.refNo || 'memo'}.docx`);
 }
 
-function printThankYouDocument(t) {
+async function openThankYouPromptModal(t) {
+  const html = `
+    <div class="modal-backdrop" role="presentation">
+      <div class="modal" style="width:min(680px, 96vw);" role="dialog" aria-modal="true" aria-labelledby="thankyou-prompt-title">
+        <div class="modal-head">
+          <h2 id="thankyou-prompt-title">${icon('award')} จัดทำหนังสือขอบคุณ</h2>
+          <button class="icon-button" type="button" data-close aria-label="ปิด">${icon('close')}</button>
+        </div>
+        <form id="thankyou-prompt-form">
+          <div class="modal-body" style="display:grid;gap:14px;max-height:calc(85vh - 120px);overflow-y:auto;padding:18px 20px;">
+            <p style="font-size:13px;color:var(--muted);margin:0;">
+              ระบุหรือตรวจสอบข้อมูลสำหรับจัดทำหนังสือขอบคุณราชการ (พร้อมคู่ฉบับ) ระบบจะจัดรูปแบบ A4 สารบรรณถูกต้องสวยงามอัตโนมัติ
+            </p>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+              <label class="field compact">
+                <span style="font-weight:600;">วันที่ในหนังสือ</span>
+                <input class="control" type="date" name="docDate" value="${t.date ? t.date.slice(0, 10) : today()}" required>
+              </label>
+              <label class="field compact">
+                <span style="font-weight:600;">ผู้ส่งมอบ / แหล่งที่มา (เรียน)</span>
+                <input class="control" name="donorName" value="${esc(t.facility || '')}" placeholder="เช่น NCD ทหาร / โรงพยาบาล / มูลนิธิ" required>
+              </label>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+              <label class="field compact">
+                <span style="font-weight:600;">ชื่อสิ่งของ / ประเภทเวชภัณฑ์</span>
+                <input class="control" name="itemName" value="ยาและเวชภัณฑ์" placeholder="เช่น ยาและเวชภัณฑ์" required>
+              </label>
+              <label class="field compact">
+                <span style="font-weight:600;">สถานการณ์ในพื้นที่</span>
+                <input class="control" name="situation" value="สถานการณ์อุทกภัย" placeholder="เช่น สถานการณ์อุทกภัย / ภาวะฉุกเฉิน" required>
+              </label>
+            </div>
+
+            <label class="field compact">
+              <span style="font-weight:600;">เหตุผลในการมอบสิ่งของ</span>
+              <textarea class="control" name="reason" rows="2" style="resize:vertical;font-size:13px;" required>เพื่อนำไปใช้ประโยชน์ในภารกิจการดูแลสุขภาพและรักษาพยาบาลประชาชนในพื้นที่จังหวัดศรีสะเกษ</textarea>
+            </label>
+          </div>
+          <div class="modal-foot">
+            <button class="button secondary" type="button" data-close>ยกเลิก</button>
+            <button class="button primary" type="submit">${icon('printer')} พิมพ์ / จัดทำหนังสือขอบคุณ</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+
+  openModal(html, modal => {
+    $('#thankyou-prompt-form', modal)?.addEventListener('submit', e => {
+      e.preventDefault();
+      const fd = new FormData(e.currentTarget);
+      const meta = {
+        docDate: fd.get('docDate') || t.date,
+        itemName: (fd.get('itemName') || 'ยาและเวชภัณฑ์').trim(),
+        donorName: (fd.get('donorName') || t.facility).trim(),
+        situation: (fd.get('situation') || 'สถานการณ์อุทกภัย').trim(),
+        reason: (fd.get('reason') || '').trim()
+      };
+      closeModal();
+      printThankYouDocument(t, meta);
+    });
+  });
+}
+
+function printThankYouDocument(t, meta) {
+  if (!meta) {
+    meta = {
+      docDate: t.date || today(),
+      itemName: 'ยาและเวชภัณฑ์',
+      donorName: t.facility || '',
+      situation: 'สถานการณ์อุทกภัย',
+      reason: 'เพื่อนำไปใช้ประโยชน์ในภารกิจการดูแลสุขภาพและรักษาพยาบาลประชาชนในพื้นที่จังหวัดศรีสะเกษ'
+    };
+  }
+
   const printWindow = window.open('', '_blank');
   if (!printWindow) {
     alert('กรุณาอนุญาตป๊อปอัป (Popup) เพื่อพิมพ์เอกสาร');
     return;
   }
 
-  const itemsRows = t.items.map((line, idx) => `
-    <tr>
-      <td style="text-align:center;">${idx + 1}</td>
-      <td><strong>${esc(line.item?.name || line.itemId)}</strong></td>
-      <td style="text-align:center;">${esc(line.lot || '-')}</td>
-      <td style="text-align:right;"><strong>${fmt.format(line.qty)}</strong></td>
-      <td style="text-align:center;">${esc(line.item?.unit || 'หน่วย')}</td>
-    </tr>
-  `).join('');
+  const d = new Date(meta.docDate || t.date || today());
+  const thMonths = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+  const monthName = isNaN(d.getTime()) ? '' : thMonths[d.getMonth()];
+  const yearThai = isNaN(d.getTime()) ? '' : toThaiNum(d.getFullYear() + 543);
+  const dayThai = isNaN(d.getTime()) ? '' : toThaiNum(d.getDate());
+  const monthYearStr = `${monthName} ${yearThai}`;
+  const fullThaiDate = `${dayThai} ${monthName} ${yearThai}`;
 
   const html = `
 <!DOCTYPE html>
 <html lang="th">
 <head>
   <meta charset="UTF-8">
-  <title>หนังสือขอบคุณ - ${esc(t.facility)}</title>
+  <title>หนังสือขอบคุณ - ${esc(meta.donorName)}</title>
   <style>
     ${officialDocumentFontCss()}
-    @page { size: A4 portrait; margin: 25mm 20mm 20mm 25mm; }
+    @page { size: A4 portrait; margin: 20mm 20mm 20mm 25mm; }
     * { box-sizing: border-box; }
     html { background: #e5e7eb; }
     body {
-      font-family: 'TH Sarabun New', sans-serif;
+      font-family: 'TH Sarabun New', 'Sarabun', 'THSarabunNew', sans-serif;
       font-size: 16pt;
-      line-height: 1.18;
+      line-height: 1.22;
       color: #000;
       background: #fff;
       margin: 0;
-      min-height: 252mm;
+      padding: 0;
     }
-    .gov-letter-header {
-      text-align: center;
-      margin-bottom: 6mm;
+    .page-container {
+      position: relative;
+      min-height: 252mm;
     }
     .garuda {
       width: 30mm;
@@ -2094,53 +2168,63 @@ function printThankYouDocument(t) {
       object-fit: contain;
       margin-bottom: 2mm;
     }
+    .copy-header {
+      font-size: 36pt;
+      font-weight: 700;
+      text-align: center;
+      margin-bottom: 6mm;
+      padding-top: 2mm;
+      line-height: 1.1;
+    }
     .gov-letter-head-table {
       width: 100%;
       border-collapse: collapse;
-      margin-bottom: 4mm;
+      margin-bottom: 3mm;
       font-size: 16pt;
     }
     .gov-letter-head-table td {
       vertical-align: top;
       padding: 1mm 0;
+      line-height: 1.15;
     }
     .body-p {
       text-indent: 2.5cm;
-      margin: 3mm 0;
+      margin: 3.5mm 0;
       text-align: justify;
+      text-justify: inter-cluster;
+      line-height: 1.22;
       orphans: 3;
       widows: 3;
     }
-    table.data-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 4mm 0;
+    .closing-center {
+      text-align: center;
+      margin: 18mm 0 25mm 0;
       font-size: 16pt;
     }
-    table.data-table th, table.data-table td {
-      border: .75pt solid #000;
-      padding: 1.2mm 1.8mm;
-      line-height: 1.08;
+    .doc-footer {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      font-size: 15pt;
+      line-height: 1.22;
     }
-    table.data-table th {
-      background: #f5f5f5;
-      text-align: center;
-      font-weight: bold;
+    .doc-footer-flex {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      font-size: 15pt;
+      line-height: 1.25;
     }
-    table.data-table thead { display: table-header-group; }
-    table.data-table tr { page-break-inside: avoid; }
-    .signature-container {
-      margin-top: 12mm;
-      float: right;
-      width: 85mm;
-      text-align: center;
-      page-break-inside: avoid;
-    }
-    .sign-line {
-      margin-top: 12mm;
-      display: inline-block;
-      width: 55mm;
-      border-bottom: .75pt dotted #000;
+    .page-break {
+      page-break-before: always;
+      break-before: page;
+      margin-top: 20mm;
+      border-top: 1px dashed #cbd5e1;
     }
     .no-print-bar {
       background: #f1f5f9;
@@ -2173,13 +2257,15 @@ function printThankYouDocument(t) {
     .docx-btn:hover { background: #0d5f58; }
     .print-btn:disabled { opacity: .55; cursor: wait; }
     @media screen {
-      body { width: 210mm; margin: 12mm auto; padding: 25mm 20mm 20mm 25mm; box-shadow: 0 12px 36px rgba(15,23,42,.18); }
-      .no-print-bar { margin: -25mm -20mm 10mm -25mm; }
+      body { width: 210mm; margin: 12mm auto; padding: 20mm 20mm 20mm 25mm; box-shadow: 0 12px 36px rgba(15,23,42,.18); }
+      .no-print-bar { margin: -20mm -20mm 10mm -25mm; }
+      .page-break { margin-left: -25mm; margin-right: -20mm; padding-left: 25mm; padding-right: 20mm; }
     }
     @media print {
       .no-print-bar { display: none !important; }
       html, body { background: #fff !important; }
       body { width: auto; min-height: 0; padding: 0 !important; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+      .page-break { border: none !important; margin: 0; padding: 0; }
     }
   </style>
 </head>
@@ -2189,58 +2275,113 @@ function printThankYouDocument(t) {
     <button class="print-btn docx-btn" id="download-docx-btn" type="button">พิมพ์ / บันทึกเป็น DOCX</button>
   </div>
 
-  <div class="gov-letter-header">
-    <img class="garuda" src="${window.location.origin}/garuda.svg" alt="ตราครุฑ">
+  <!-- หน้า 1: หนังสือขอบคุณ (ฉบับจริง) -->
+  <div class="page-container">
+    <div style="text-align: center; margin-bottom: 2mm;">
+      <img class="garuda" src="${window.location.origin}/garuda.svg" alt="ตราครุฑ">
+    </div>
+
+    <table class="gov-letter-head-table">
+      <tr>
+        <td style="width: 58%; vertical-align: top;">ที่ ศก ๐๐๓๓.๐๐๔/</td>
+        <td style="text-align: left; vertical-align: top; padding-left: 10mm; white-space: nowrap;">
+          สำนักงานสาธารณสุขจังหวัดศรีสะเกษ<br>
+          ถนนศรีสะเกษ-กันทรลักษ์ ศก ๓๓๐๐๐
+        </td>
+      </tr>
+      <tr>
+        <td colspan="2" style="text-align: center; padding-top: 2mm; padding-bottom: 2.5mm;">
+          ${monthYearStr}
+        </td>
+      </tr>
+    </table>
+
+    <div style="margin-bottom: 2mm; font-size: 16pt;">
+      <strong>เรื่อง</strong>  ขอบคุณในการสนับสนุน${esc(toThaiNum(meta.itemName))}${esc(toThaiNum(meta.reason))}
+    </div>
+    <div style="margin-bottom: 4mm; font-size: 16pt;">
+      <strong>เรียน</strong>  ${esc(toThaiNum(meta.donorName))}
+    </div>
+
+    <p class="body-p">
+      ด้วย${esc(toThaiNum(meta.situation))}ในพื้นที่จังหวัดศรีสะเกษ ได้ส่งผลกระทบต่อประชาชนและเจ้าหน้าที่ผู้ปฏิบัติงานในพื้นที่ จำเป็นต้องได้รับการสนับสนุนด้านยา เวชภัณฑ์ เครื่องอุปโภคบริโภค และการดูแลสุขภาพอนามัยในภาวะฉุกเฉิน ซึ่งสำนักงานสาธารณสุขจังหวัดศรีสะเกษ โดยกลุ่มงานคุ้มครองผู้บริโภคและเภสัชสาธารณสุข ได้รับการสนับสนุนยาและเวชภัณฑ์จากท่าน เมื่อวันที่ ${fullThaiDate} เพื่อสนับสนุนการดำเนินงานในสถานการณ์ดังกล่าว
+    </p>
+
+    <p class="body-p">
+      ในการนี้ สำนักงานสาธารณสุขจังหวัดศรีสะเกษ ขอขอบคุณท่านที่ได้ให้ความอนุเคราะห์ การสนับสนุนของท่านมีคุณค่าอย่างยิ่ง และเป็นกำลังใจสำคัญต่อผู้ปฏิบัติงานและผู้ได้รับผลกระทบในครั้งนี้
+    </p>
+
+    <p class="body-p">
+      จึงเรียนมาเพื่อโปรดทราบ
+    </p>
+
+    <div class="closing-center">
+      ขอแสดงความนับถือ
+    </div>
+
+    <div class="doc-footer">
+      <div>กลุ่มงานคุ้มครองผู้บริโภคและเภสัชสาธารณสุข</div>
+      <div>โทร. ๐ ๔๕๖๑ ๖๐๔๐-๖ ต่อ ๓๐๕</div>
+      <div>โทรสาร ๐ ๔๕๖๑ ๖๐๔๒</div>
+    </div>
   </div>
 
-  <table class="gov-letter-head-table">
-    <tr>
-      <td style="width: 50%;">ที่ ศก ๐๐๓๒ / ${esc(t.refNo)}</td>
-      <td style="text-align: right;">สำนักงานสาธารณสุขจังหวัดศรีสะเกษ<br>ถนนกสิกรรม ศก ๓๓๐๐๐</td>
-    </tr>
-    <tr>
-      <td colspan="2" style="text-align: center; padding-top: 15px;">
-        ${thaiFullDate(t.date)}
-      </td>
-    </tr>
-  </table>
+  <!-- หน้า 2: คู่ฉบับ -->
+  <div class="page-break"></div>
+  <div class="page-container" style="padding-top: 2mm;">
+    <div class="copy-header">คู่ฉบับ</div>
 
-  <p><strong>เรื่อง:</strong> ขอขอบคุณสำหรับการสนับสนุนยาและเวชภัณฑ์</p>
-  <p><strong>เรียน:</strong> ผู้บริหาร / ผู้มีอุปการคุณ <strong>${esc(t.facility)}</strong></p>
-
-  <p class="body-p">
-    ตามที่ท่านและหน่วยงานได้มอบความอนุเคราะห์ สนับสนุนยาและเวชภัณฑ์ให้แก่สำนักงานสาธารณสุขจังหวัดศรีสะเกษ เพื่อนำไปใช้ประโยชน์ในภารกิจการดูแลสุขภาพและรักษาพยาบาลประชาชนในพื้นที่จังหวัดศรีสะเกษนั้น
-  </p>
-
-  <p class="body-p">
-    สำนักงานสาธารณสุขจังหวัดศรีสะเกษ ขอขอบพระคุณท่านและคณะเป็นอย่างยิ่ง สำหรับความอนุเคราะห์และไมตรีจิตอันดียิ่งในครั้งนี้ โดยมีรายการยาและเวชภัณฑ์ที่ได้รับมอบดังนี้:
-  </p>
-
-  <table class="data-table">
-    <thead>
+    <table class="gov-letter-head-table">
       <tr>
-        <th style="width: 40px;">ลำดับ</th>
-        <th>รายการ</th>
-        <th style="width: 120px;">ล็อต</th>
-        <th style="width: 100px;">จำนวน</th>
-        <th style="width: 90px;">หน่วย</th>
+        <td style="width: 58%; vertical-align: top;">ที่ ศก ๐๐๓๓.๐๐๔/</td>
+        <td style="text-align: left; vertical-align: top; padding-left: 10mm; white-space: nowrap;">
+          สำนักงานสาธารณสุขจังหวัดศรีสะเกษ<br>
+          ถนนศรีสะเกษ-กันทรลักษ์ ศก ๓๓๐๐๐
+        </td>
       </tr>
-    </thead>
-    <tbody>
-      ${itemsRows}
-    </tbody>
-  </table>
+      <tr>
+        <td colspan="2" style="text-align: center; padding-top: 2mm; padding-bottom: 2.5mm;">
+          ${monthYearStr}
+        </td>
+      </tr>
+    </table>
 
-  <p class="body-p">
-    ในโอกาสนี้ ขออัญเชิญคุณพระศรีรัตนตรัย พระพุทธศรีโพธิ์นายก และสิ่งศักดิ์สิทธิ์ทั้งหลายในสากลโลก ได้โปรดดลบันดาลประทานพรให้ท่าน คณะผู้บริหาร และบุคลากรทุกท่าน ประสบแต่ความสุข ความเจริญ ด้วยจตุรพิธพรชัย มีสุขภาพพลานามัยที่สมบูรณ์แข็งแรง และสัมฤทธิผลในสิ่งอันพึงปรารถนาทุกประการเทอญ
-  </p>
+    <div style="margin-bottom: 2mm; font-size: 16pt;">
+      <strong>เรื่อง</strong>  ขอบคุณในการสนับสนุน${esc(toThaiNum(meta.itemName))}${esc(toThaiNum(meta.reason))}
+    </div>
+    <div style="margin-bottom: 4mm; font-size: 16pt;">
+      <strong>เรียน</strong>  ${esc(toThaiNum(meta.donorName))}
+    </div>
 
-  <p class="body-p" style="margin-top: 30px;">ขอแสดงความนับถืออย่างยิ่ง</p>
+    <p class="body-p">
+      ด้วย${esc(toThaiNum(meta.situation))}ในพื้นที่จังหวัดศรีสะเกษ ได้ส่งผลกระทบต่อประชาชนและเจ้าหน้าที่ผู้ปฏิบัติงานในพื้นที่ จำเป็นต้องได้รับการสนับสนุนด้านยา เวชภัณฑ์ เครื่องอุปโภคบริโภค และการดูแลสุขภาพอนามัยในภาวะฉุกเฉิน ซึ่งสำนักงานสาธารณสุขจังหวัดศรีสะเกษ โดยกลุ่มงานคุ้มครองผู้บริโภคและเภสัชสาธารณสุข ได้รับการสนับสนุนยาและเวชภัณฑ์จากท่าน เมื่อวันที่ ${fullThaiDate} เพื่อสนับสนุนการดำเนินงานในสถานการณ์ดังกล่าว
+    </p>
 
-  <div class="signature-container">
-    <p>ลงชื่อ <span class="sign-line"></span></p>
-    <p>(........................................................)</p>
-    <p>นายแพทย์สาธารณสุขจังหวัดศรีสะเกษ</p>
+    <p class="body-p">
+      ในการนี้ สำนักงานสาธารณสุขจังหวัดศรีสะเกษ ขอขอบคุณท่านที่ได้ให้ความอนุเคราะห์ การสนับสนุนของท่านมีคุณค่าอย่างยิ่ง และเป็นกำลังใจสำคัญต่อผู้ปฏิบัติงานและผู้ได้รับผลกระทบในครั้งนี้
+    </p>
+
+    <p class="body-p">
+      จึงเรียนมาเพื่อโปรดทราบ
+    </p>
+
+    <div class="closing-center">
+      ขอแสดงความนับถือ
+    </div>
+
+    <div class="doc-footer-flex">
+      <div>
+        <div>กลุ่มงานคุ้มครองผู้บริโภคและเภสัชสาธารณสุข</div>
+        <div>โทร. ๐ ๔๕๖๑ ๖๐๔๐-๖ ต่อ ๓๐๕</div>
+        <div>โทรสาร ๐ ๔๕๖๑ ๖๐๔๒</div>
+      </div>
+      <div style="text-align: left; font-size: 14pt; line-height: 1.6; color: #000;">
+        <div>ร่าง................................................</div>
+        <div>พิมพ์...............................................</div>
+        <div>ทาน................................................</div>
+        <div>ตรวจ...............................................</div>
+      </div>
+    </div>
   </div>
 </body>
 </html>`;
@@ -3029,9 +3170,9 @@ async function openTransactionDetail(txnId, pageType) {
         openInboundMemoPromptModal(t);
       });
 
-      // Print Thank You Button
+      // Print Thank You Button (Opens Thank You Prompt Modal)
       $('#print-thankyou-btn', modal)?.addEventListener('click', () => {
-        printThankYouDocument(t);
+        openThankYouPromptModal(t);
       });
 
       // Print Goods Receipt / Delivery Note Button (Opens Prompt Modal for Extra Info)

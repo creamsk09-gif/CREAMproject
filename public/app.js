@@ -1067,15 +1067,16 @@ async function loadTxPage(type, page) {
     const d = await api(`/api/transactions?type=${type}&limit=9&page=${page}`);
     container.innerHTML = `
       <div class="transaction-list">
-        ${d.transactions.length ? d.transactions.map(t => transactionCard(t, type)).join('') : '<div class="empty-inline">ยังไม่มีรายการ</div>'}
+        ${d.transactions && d.transactions.length ? d.transactions.map(t => transactionCard(t, type)).join('') : '<div class="empty-inline">ยังไม่มีรายการ</div>'}
       </div>
-      ${d.meta ? buildPagination(d.meta, p => loadTxPage(type, p)) : ''}
+      ${d.meta ? renderPagination(d.meta, p => loadTxPage(type, p)) : ''}
     `;
     $$('.transaction-card', container).forEach(card => {
       card.addEventListener('click', () => openTransactionDetail(card.dataset.id, type));
     });
   } catch (err) {
-    container.innerHTML = '<div class="empty-inline">เกิดข้อผิดพลาดในการโหลดข้อมูล</div>';
+    console.error('loadTxPage error:', err);
+    container.innerHTML = `<div class="empty-inline">เกิดข้อผิดพลาดในการโหลดข้อมูล (${esc(err.message || 'ไม่ทราบสาเหตุ')})</div>`;
   }
 }
 

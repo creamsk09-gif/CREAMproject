@@ -407,9 +407,11 @@ test('GET /api/notifications/expiry-preview and POST /api/notifications/expiry-a
     body: JSON.stringify({ username: 'admin', password: 'stock2569' })
   });
   assert.equal(loginRes.status, 200);
-  const newCookie = loginRes.headers.get('set-cookie').split(';')[0];
+  cookie = loginRes.headers.get('set-cookie').split(';')[0];
   const loginData = await loginRes.json();
-  const newCsrf = loginData.csrf;
+  csrf = loginData.csrf;
+  const newCookie = cookie;
+  const newCsrf = csrf;
 
   // 1. GET preview
   const previewRes = await fetch(`${base}/api/notifications/expiry-preview?days=180`, {
@@ -450,4 +452,132 @@ test('GET /api/notifications/expiry-preview and POST /api/notifications/expiry-a
   assert.ok(Array.isArray(historyData.emailLogs));
   assert.ok(historyData.emailLogs.some(l => l.recipient === 'lew0994733933@gmail.com'));
 });
+
+/* ── Procurement Plan & YoY Analytics Tests ── */
+test('GET /api/procurement/categories returns 14 categories and 3 groups', async () => {
+  const res = await fetch(`${base}/api/procurement/categories`, { headers: { cookie } });
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.equal(data.categories.length, 14);
+  assert.equal(data.groups.length, 3);
+  assert.ok(data.categories.some(c => c.id === 'drugEd'));
+  assert.ok(data.categories.some(c => c.id === 'dental'));
+  assert.ok(data.categories.some(c => c.id === 'herbalEd'));
+});
+
+test('GET /api/procurement/plans returns seeded plans for 22 hospitals', async () => {
+  const res = await fetch(`${base}/api/procurement/plans?year=2569`, { headers: { cookie } });
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.equal(data.plans.length, 22);
+
+  const khukhan = data.plans.find(p => p.hospitalId === 'hsp-004');
+  assert.ok(khukhan);
+  assert.equal(khukhan.hospitalName, 'ขุขันธ์');
+  assert.equal(khukhan.categories.dental.count, 417);
+  assert.equal(khukhan.categories.dental.value, 1782452.70);
+  assert.equal(khukhan.tracking.score, 3);
+});
+
+test('GET /api/procurement/compare calculates YoY analytics and hospital rankings', async () => {
+  const res = await fetch(`${base}/api/procurement/compare?currentYear=2569&previousYear=2568`, { headers: { cookie } });
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.equal(data.ok, true);
+  assert.equal(data.currentYear, 2569);
+  assert.equal(data.previousYear, 2568);
+  assert.ok(data.summary.currentTotalValue > 500000000);
+  assert.equal(data.categoryComparison.length, 14);
+  assert.equal(data.hospitalRanking.length, 22);
+  assert.equal(data.summary.submission.total, 22);
+  assert.equal(data.summary.submission.submitted, 21);
+});
+
+test('POST /api/procurement/plans saves and updates plan with CSRF verification', async () => {
+  // Reject without CSRF
+  const rejectRes = await fetch(`${base}/api/procurement/plans`, {
+    method: 'POST',
+    headers: { cookie, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ hospitalId: 'hsp-004', fiscalYear: 2569 })
+  });
+  assert.equal(rejectRes.status, 403);
+
+  // Valid mutation
+  const updateRes = await fetch(`${base}/api/procurement/plans`, {
+    method: 'POST',
+    headers: { cookie, 'X-CSRF-Token': csrf, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      hospitalId: 'hsp-004',
+      hospitalName: 'โรงพยาบาลขุขันธ์',
+      fiscalYear: 2569,
+      categories: {
+        dental: { count: 500, value: 2000000.00 },
+        drugEd: { count: 450, value: 45000000.00 }
+      },
+      tracking: {
+        planSubmission: 'ส่ง',
+        maintenancePlan: 'เรียบร้อย',
+        scorePeriod: 'oct_nov',
+        score: 3,
+        secPass: true,
+        fileDown: true,
+        returned: true
+      }
+    })
+  });
+  assert.equal(updateRes.status, 200);
+  const updateData = await updateRes.json();
+  assert.equal(updateData.ok, true);
+  assert.equal(updateData.plan.totalValue, 47000000.00);
+  assert.equal(updateData.plan.totalItems, 950);
+});
+
+test('GET /api/export/procurement.csv exports UTF-8 CSV with BOM for Excel', async () => {
+  const res = await fetch(`${base}/api/export/procurement.csv?year=2569`, { headers: { cookie } });
+  assert.equal(res.status, 200);
+  assert.ok(res.headers.get('content-type').includes('text/csv'));
+  const buf = Buffer.from(await res.arrayBuffer());
+  assert.equal(buf[0], 0xEF);
+  assert.equal(buf[1], 0xBB);
+  assert.equal(buf[2], 0xBF);
+  const text = buf.toString('utf8');
+  assert.ok(text.includes('ลำดับ,ชื่อโรงพยาบาล'));
+  assert.ok(text.includes('รวมทั้งจังหวัดศรีสะเกษ'));
+  assert.ok(text.includes('ขุขันธ์'));
+});
+
+test('POST /api/procurement/reset restores default PDF seed dataset', async () => {
+  const res = await fetch(`${base}/api/procurement/reset`, {
+    method: 'POST',
+    headers: { cookie, 'X-CSRF-Token': csrf, 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  });
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.equal(data.ok, true);
+
+  const plansRes = await fetch(`${base}/api/procurement/plans?year=2569`, { headers: { cookie } });
+  const plansData = await plansRes.json();
+  const khukhan = plansData.plans.find(p => p.hospitalId === 'hsp-004');
+  assert.equal(khukhan.categories.dental.value, 1782452.70);
+});
+
+test('POST /api/procurement/years creates new fiscal year plans for all 22 hospitals', async () => {
+  const res = await fetch(`${base}/api/procurement/years`, {
+    method: 'POST',
+    headers: { cookie, 'X-CSRF-Token': csrf, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ year: 2570, cloneFrom: 2569 })
+  });
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.equal(data.ok, true);
+  assert.equal(data.year, 2570);
+  assert.ok(data.years.includes(2570));
+
+  const plansRes = await fetch(`${base}/api/procurement/plans?year=2570`, { headers: { cookie } });
+  const plansData = await plansRes.json();
+  assert.equal(plansData.plans.length, 22);
+  assert.ok(plansData.years.includes(2570));
+});
+
 

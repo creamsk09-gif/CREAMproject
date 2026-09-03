@@ -23,6 +23,15 @@ if (typeof process.loadEnvFile === 'function') {
 
 const { suggestMappings, learnFromDecision } = require('./lib/mapping-engine');
 const emailService = require('./lib/email-service');
+const {
+  PROCUREMENT_CATEGORIES,
+  CATEGORY_GROUPS,
+  PDF_SEED_2569,
+  getDefaultProcurementPlans,
+  calculatePlanTotals,
+  compareProcurementYears,
+  generateProcurementCsv
+} = require('./lib/procurement-service');
 const SEED_TEMPLATE = require('./data/seed.json');
 
 const ROOT = __dirname;
@@ -143,8 +152,11 @@ async function ensureDb() {
     readSeed()
   ]);
   let changed = false;
-  for (const key of ['hospitalNetwork', 'mappingQueue', 'rebalancing']) {
-    if (!Array.isArray(db[key])) { db[key] = seed[key]; changed = true; }
+  for (const key of ['hospitalNetwork', 'mappingQueue', 'rebalancing', 'procurementPlans']) {
+    if (!Array.isArray(db[key])) {
+      db[key] = key === 'procurementPlans' ? getDefaultProcurementPlans() : (seed[key] || []);
+      changed = true;
+    }
   }
   if (changed) await writeDb(db);
 }
@@ -174,9 +186,24 @@ async function writeDb(db) {
     Object.defineProperty(db, DB_ETAG, { value: result.etag, writable: true, enumerable: false, configurable: true });
     return;
   }
-  const tmp = `${DB_FILE}.${process.pid}.tmp`;
+  const tmp = `${DB_FILE}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
   await fsp.writeFile(tmp, JSON.stringify(db, null, 2), 'utf8');
-  await fsp.rename(tmp, DB_FILE);
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      await fsp.rename(tmp, DB_FILE);
+      return;
+    } catch (err) {
+      if (attempt === 4 || (err.code !== 'EPERM' && err.code !== 'EBUSY')) {
+        try {
+          await fsp.writeFile(DB_FILE, JSON.stringify(db, null, 2), 'utf8');
+          await fsp.unlink(tmp).catch(() => {});
+          return;
+        } catch (_) {}
+        throw err;
+      }
+      await new Promise(r => setTimeout(r, 40 * (attempt + 1)));
+    }
+  }
 }
 
 function json(res, status, data, extra = {}) {
@@ -1070,6 +1097,226 @@ async function api(req, res, url) {
   if (req.method === 'GET' && url.pathname === '/api/master-data') return json(res, 200, { facilities: db.facilities, integrations: db.integrations, meta: db.meta, audit: db.audit.slice(-20).reverse() });
 
   if (req.method === 'GET' && url.pathname === '/api/v1/stock') return json(res, 200, { apiVersion: '1.0', generatedAt: new Date().toISOString(), warehouse: db.meta.warehouse, data: db.items.filter(i => i.active).map(enrich) });
+
+  if (req.method === 'GET' && url.pathname === '/api/procurement/categories') {
+    return json(res, 200, { categories: PROCUREMENT_CATEGORIES, groups: CATEGORY_GROUPS });
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/procurement/plans') {
+    const year = url.searchParams.get('year');
+    const hospitalId = url.searchParams.get('hospitalId');
+    let plans = db.procurementPlans || [];
+    if (year) plans = plans.filter(p => p.fiscalYear === Number(year));
+    if (hospitalId) plans = plans.filter(p => p.hospitalId === hospitalId);
+    const years = [...new Set((db.procurementPlans || []).map(p => p.fiscalYear))].sort((a, b) => b - a);
+    return json(res, 200, {
+      plans,
+      categories: PROCUREMENT_CATEGORIES,
+      groups: CATEGORY_GROUPS,
+      years: years.length ? years : [2569, 2568],
+      hospitals: db.hospitalNetwork || []
+    });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/procurement/plans') {
+    const input = await body(req);
+    const fiscalYear = Number(input.fiscalYear) || 2569;
+    const hospitalId = String(input.hospitalId || '').trim();
+    if (!hospitalId) return error(res, 422, 'VALIDATION_FAILED', 'กรุณาระบุโรงพยาบาล');
+    const hospitalNet = (db.hospitalNetwork || []).find(h => h.id === hospitalId);
+    const hospitalName = String(input.hospitalName || hospitalNet?.name || hospitalId).trim();
+    const categories = input.categories || {};
+    const totals = calculatePlanTotals(categories);
+
+    if (!Array.isArray(db.procurementPlans)) db.procurementPlans = [];
+    const idx = db.procurementPlans.findIndex(p => p.hospitalId === hospitalId && p.fiscalYear === fiscalYear);
+    const planRecord = {
+      id: idx >= 0 ? db.procurementPlans[idx].id : `plan-${fiscalYear}-${hospitalId}`,
+      hospitalId,
+      hospitalName,
+      fiscalYear,
+      categories,
+      totalValue: totals.totalValue,
+      totalItems: totals.totalItems,
+      attachment: input.attachment || null,
+      tracking: {
+        planSubmission: input.tracking?.planSubmission || 'ส่ง',
+        maintenancePlan: input.tracking?.maintenancePlan || 'เรียบร้อย',
+        scorePeriod: input.tracking?.scorePeriod || 'oct_nov',
+        score: Number(input.tracking?.score ?? 3),
+        secPass: Boolean(input.tracking?.secPass ?? true),
+        fileDown: Boolean(input.tracking?.fileDown ?? true),
+        returned: Boolean(input.tracking?.returned ?? true)
+      },
+      updatedAt: new Date().toISOString(),
+      updatedBy: s.user.id
+    };
+
+    if (idx >= 0) {
+      db.procurementPlans[idx] = planRecord;
+    } else {
+      db.procurementPlans.push(planRecord);
+    }
+
+    db.audit.push({
+      id: `aud-${crypto.randomUUID()}`,
+      action: idx >= 0 ? 'PLAN_UPDATE' : 'PLAN_CREATE',
+      entity: 'procurementPlan',
+      entityId: planRecord.id,
+      user: s.user.id,
+      at: planRecord.updatedAt,
+      detail: `${idx >= 0 ? 'อัปเดต' : 'สร้าง'}แผนจัดซื้อปี ${fiscalYear} ของ ${hospitalName} มูลค่ารวม ${totals.totalValue.toLocaleString('th-TH')} บาท`
+    });
+
+    await writeDb(db);
+    return json(res, 200, { ok: true, plan: planRecord });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/procurement/batch') {
+    const input = await body(req);
+    const fiscalYear = Number(input.fiscalYear) || 2569;
+    const plansInput = Array.isArray(input.plans) ? input.plans : [];
+    if (!plansInput.length) return error(res, 422, 'VALIDATION_FAILED', 'ไม่มีข้อมูลแผนจัดซื้อที่ต้องบันทึก');
+
+    if (!Array.isArray(db.procurementPlans)) db.procurementPlans = [];
+    for (const item of plansInput) {
+      const hospitalId = String(item.hospitalId || '').trim();
+      if (!hospitalId) continue;
+      const hospitalNet = (db.hospitalNetwork || []).find(h => h.id === hospitalId);
+      const hospitalName = String(item.hospitalName || hospitalNet?.name || hospitalId).trim();
+      const categories = item.categories || {};
+      const totals = calculatePlanTotals(categories);
+
+      const idx = db.procurementPlans.findIndex(p => p.hospitalId === hospitalId && p.fiscalYear === fiscalYear);
+      const planRecord = {
+        id: idx >= 0 ? db.procurementPlans[idx].id : `plan-${fiscalYear}-${hospitalId}`,
+        hospitalId,
+        hospitalName,
+        fiscalYear,
+        categories,
+        totalValue: totals.totalValue,
+        totalItems: totals.totalItems,
+        tracking: {
+          planSubmission: item.tracking?.planSubmission || 'ส่ง',
+          maintenancePlan: item.tracking?.maintenancePlan || 'เรียบร้อย',
+          scorePeriod: item.tracking?.scorePeriod || 'oct_nov',
+          score: Number(item.tracking?.score ?? 3),
+          secPass: Boolean(item.tracking?.secPass ?? true),
+          fileDown: Boolean(item.tracking?.fileDown ?? true),
+          returned: Boolean(item.tracking?.returned ?? true)
+        },
+        updatedAt: new Date().toISOString(),
+        updatedBy: s.user.id
+      };
+
+      if (idx >= 0) db.procurementPlans[idx] = planRecord;
+      else db.procurementPlans.push(planRecord);
+    }
+
+    db.audit.push({
+      id: `aud-${crypto.randomUUID()}`,
+      action: 'PLAN_BATCH_UPDATE',
+      entity: 'procurementPlan',
+      entityId: `batch-${fiscalYear}`,
+      user: s.user.id,
+      at: new Date().toISOString(),
+      detail: `อัปเดตข้อมูลแผนจัดซื้อแบบกลุ่มปี ${fiscalYear} จำนวน ${plansInput.length} โรงพยาบาล`
+    });
+
+    await writeDb(db);
+    return json(res, 200, { ok: true, count: plansInput.length });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/procurement/years') {
+    const input = await body(req);
+    const newYear = Number(input.year);
+    if (!newYear || newYear < 2500 || newYear > 2600) {
+      return error(res, 422, 'VALIDATION_FAILED', 'กรุณาระบุปีงบประมาณที่ถูกต้อง (พ.ศ. 2500 - 2600)');
+    }
+    const cloneFrom = input.cloneFrom ? Number(input.cloneFrom) : null;
+    if (!Array.isArray(db.procurementPlans)) db.procurementPlans = [];
+    
+    const existing = db.procurementPlans.filter(p => p.fiscalYear === newYear);
+    if (existing.length === 0) {
+      const sourcePlans = cloneFrom ? db.procurementPlans.filter(p => p.fiscalYear === cloneFrom) : [];
+      const hospitals = db.hospitalNetwork || [];
+      
+      for (const h of hospitals) {
+        const src = sourcePlans.find(p => p.hospitalId === h.id);
+        const categories = src ? JSON.parse(JSON.stringify(src.categories)) : {};
+        const totals = calculatePlanTotals(categories);
+        
+        db.procurementPlans.push({
+          id: `plan-${newYear}-${h.id}`,
+          hospitalId: h.id,
+          hospitalName: h.name,
+          fiscalYear: newYear,
+          categories,
+          totalValue: totals.totalValue,
+          totalItems: totals.totalItems,
+          attachment: null,
+          tracking: src ? { ...src.tracking } : {
+            planSubmission: 'ส่ง',
+            maintenancePlan: 'เรียบร้อย',
+            scorePeriod: 'oct_nov',
+            score: 3,
+            secPass: true,
+            fileDown: true,
+            returned: true
+          },
+          updatedAt: new Date().toISOString(),
+          updatedBy: s.user.id
+        });
+      }
+
+      db.audit.push({
+        id: `aud-${crypto.randomUUID()}`,
+        action: 'PLAN_YEAR_CREATE',
+        entity: 'procurementPlan',
+        entityId: `year-${newYear}`,
+        user: s.user.id,
+        at: new Date().toISOString(),
+        detail: `เพิ่มปีงบประมาณแผนจัดซื้อ ${newYear} (คัดลอกจากปี ${cloneFrom || 'เริ่มต้นว่าง'})`
+      });
+
+      await writeDb(db);
+    }
+    
+    const years = [...new Set(db.procurementPlans.map(p => p.fiscalYear))].sort((a, b) => b - a);
+    return json(res, 200, { ok: true, year: newYear, years });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/procurement/reset') {
+    db.procurementPlans = getDefaultProcurementPlans();
+    db.audit.push({
+      id: `aud-${crypto.randomUUID()}`,
+      action: 'PLAN_RESET',
+      entity: 'procurementPlan',
+      entityId: 'all',
+      user: s.user.id,
+      at: new Date().toISOString(),
+      detail: 'รีเซ็ตข้อมูลแผนจัดซื้อเป็นค่าเริ่มต้นจากเอกสาร PDF'
+    });
+    await writeDb(db);
+    return json(res, 200, { ok: true, message: 'รีเซ็ตข้อมูลแผนจัดซื้อเป็นค่าเริ่มต้นเรียบร้อยแล้ว' });
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/procurement/compare') {
+    const currentYear = Number(url.searchParams.get('currentYear')) || 2569;
+    const previousYear = Number(url.searchParams.get('previousYear')) || 2568;
+    const comparison = compareProcurementYears(db.procurementPlans || [], currentYear, previousYear, db.hospitalNetwork || []);
+    return json(res, 200, { ok: true, ...comparison });
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/export/procurement.csv') {
+    const year = Number(url.searchParams.get('year')) || 2569;
+    const csvData = generateProcurementCsv(db.procurementPlans || [], year, db.hospitalNetwork || []);
+    res.writeHead(200, {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="sisaket-procurement-plan-${year}.csv"`
+    });
+    return res.end(csvData);
+  }
 
   if (req.method === 'GET' && url.pathname === '/api/export/inventory.csv') {
     const headers = ['code','name','category','quantity','unit','lot','expiry','location','status','source_sheet','source_row'];

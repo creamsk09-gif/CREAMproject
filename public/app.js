@@ -18,7 +18,12 @@ const icons = {
   print:'<polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>',
   award:'<circle cx="12" cy="8" r="6"/><path d="M15.477 12.89 17 22l-5-3-5 3 1.523-9.11"/>',
   paperclip:'<path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>',
-  upload:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>'
+  upload:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>',
+  chart:'<path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/>',
+  table:'<path d="M3 3h18v18H3z"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/><path d="M15 3v18"/>',
+  save:'<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>',
+  trendingUp:'<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>',
+  trendingDown:'<polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/>'
 };
 
 const icon = (name, label='') => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="${!label}">${label ? `<title>${label}</title>` : ''}${icons[name] || icons.info}</svg>`;
@@ -48,6 +53,7 @@ const dateFmt = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'short
 const routeTitles = {
   dashboard: 'ภาพรวมคลัง',
   province: 'ภาพรวมสต็อกทั้งจังหวัด',
+  procurement: 'แผนจัดซื้อและวิเคราะห์เปรียบเทียบ',
   mapping: 'AI Mapping Studio',
   inbound: 'รับเข้าคลัง',
   outbound: 'เบิกจ่ายออกจากคลัง',
@@ -436,7 +442,7 @@ async function route() {
   stopPolling();
   const raw = (location.hash.slice(1) || 'dashboard');
   const [name, query = ''] = raw.split('?');
-  state.route = ['dashboard', 'province', 'mapping', 'inbound', 'outbound', 'stock', 'data'].includes(name) ? name : 'dashboard';
+  state.route = ['dashboard', 'province', 'procurement', 'mapping', 'inbound', 'outbound', 'stock', 'data'].includes(name) ? name : 'dashboard';
   
   $$('[data-route]').forEach(a => a.classList.toggle('active', a.dataset.route === state.route));
   document.title = `${routeTitles[state.route]} | Stock Logistics Sisaket`;
@@ -447,6 +453,7 @@ async function route() {
     if (!state.items.length) await loadItems();
     if (state.route === 'dashboard') await dashboard();
     else if (state.route === 'province') await provincePage();
+    else if (state.route === 'procurement') await procurementPage();
     else if (state.route === 'mapping') await mappingPage();
     else if (state.route === 'inbound') await transactionPage('inbound');
     else if (state.route === 'outbound') await transactionPage('outbound');
@@ -797,6 +804,1486 @@ async function openHospitalDetail(hspId) {
   } catch (ex) {
     toast(ex.message, 'error');
   }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   2.1 PROCUREMENT PLANS & COMPARATIVE ANALYTICS (แผนจัดซื้อ)
+   ══════════════════════════════════════════════════════════════ */
+let procState = {
+  curYear: 2569,
+  prevYear: 2568,
+  selectedYears: [2569, 2568], // Multi-year array for comparison
+  selectedHspId: 'hsp-004', // Default: รพ.ขุขันธ์
+  activeTab: 'comparison', // 'comparison' | 'hospitals' | 'master'
+  inputMode: 'manual', // 'manual' | 'upload' | 'paste'
+  searchQuery: '',
+  filterGroup: 'all', // 'all' | 'ยาแผนปัจจุบัน' | 'ยาสมุนไพรและวัตถุดิบ' | 'เวชภัณฑ์และวัสดุการแพทย์'
+  selectedCategoryIds: [], // empty = all 14 categories selected
+  growthFilter: 'all', // 'all' | 'up' | 'down' | 'top5'
+  sortBy: 'default' // 'default' | 'value_desc' | 'pct_desc' | 'pct_asc'
+};
+
+async function procurementPage() {
+  // Ensure selectedYears is valid array sorted descending
+  if (!Array.isArray(procState.selectedYears) || procState.selectedYears.length === 0) {
+    procState.selectedYears = [2569, 2568];
+  }
+  procState.selectedYears.sort((a, b) => b - a);
+  procState.curYear = procState.selectedYears[0];
+  procState.prevYear = procState.selectedYears.length > 1 ? procState.selectedYears[1] : (procState.curYear === 2569 ? 2568 : procState.curYear - 1);
+
+  const [plansRes, compareRes] = await Promise.all([
+    api('/api/procurement/plans'),
+    api(`/api/procurement/compare?currentYear=${procState.curYear}&previousYear=${procState.prevYear}`)
+  ]);
+
+  const { plans, categories, groups, years, hospitals } = plansRes;
+  const { summary, categoryComparison, groupComparison, hospitalRanking, hospitalComparison } = compareRes;
+
+  // Multi-Year Color Palette
+  const YEAR_COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#14b8a6'];
+  const getYearColor = (yr) => {
+    const idx = procState.selectedYears.indexOf(Number(yr));
+    return idx >= 0 ? YEAR_COLORS[idx % YEAR_COLORS.length] : '#94a3b8';
+  };
+
+  // Multi-Year Category Data Computation
+  const categoryYearData = categories.map(cat => {
+    const yearValues = {};
+    for (const yr of procState.selectedYears) {
+      const yrPlans = plans.filter(p => p.fiscalYear === yr);
+      const yrVal = yrPlans.reduce((sum, p) => sum + (Number(p.categories?.[cat.id]?.value) || 0), 0);
+      const yrCount = yrPlans.reduce((sum, p) => sum + (Number(p.categories?.[cat.id]?.count) || 0), 0);
+      yearValues[yr] = { value: Math.round(yrVal * 100) / 100, count: yrCount };
+    }
+    const curVal = yearValues[procState.curYear]?.value || 0;
+    const prevVal = yearValues[procState.prevYear]?.value || 0;
+    const diffVal = curVal - prevVal;
+    const growthPct = prevVal > 0 ? ((diffVal / prevVal) * 100) : (curVal > 0 ? 100 : 0);
+    const sharePct = summary.currentTotalValue > 0 ? ((curVal / summary.currentTotalValue) * 100) : 0;
+
+    return {
+      id: cat.id,
+      name: cat.name,
+      shortName: cat.shortName,
+      group: cat.group,
+      yearValues,
+      currentValue: curVal,
+      previousValue: prevVal,
+      diffValue: Math.round(diffVal * 100) / 100,
+      growthPct: Math.round(growthPct * 10) / 10,
+      sharePct: Math.round(sharePct * 10) / 10
+    };
+  });
+
+  // Filtered & Sorted Categories for Visualization & Table
+  let displayedCategories = categoryYearData.filter(cat => {
+    if (procState.filterGroup !== 'all' && cat.group !== procState.filterGroup) return false;
+    if (procState.selectedCategoryIds.length > 0 && !procState.selectedCategoryIds.includes(cat.id)) return false;
+    if (procState.growthFilter === 'up' && cat.diffValue <= 0) return false;
+    if (procState.growthFilter === 'down' && cat.diffValue >= 0) return false;
+    return true;
+  });
+
+  if (procState.growthFilter === 'top5') {
+    displayedCategories = [...displayedCategories].sort((a, b) => b.currentValue - a.currentValue).slice(0, 5);
+  }
+
+  if (procState.sortBy === 'value_desc') {
+    displayedCategories.sort((a, b) => b.currentValue - a.currentValue);
+  } else if (procState.sortBy === 'pct_desc') {
+    displayedCategories.sort((a, b) => b.growthPct - a.growthPct);
+  } else if (procState.sortBy === 'pct_asc') {
+    displayedCategories.sort((a, b) => a.growthPct - b.growthPct);
+  }
+
+  // Selected hospital and plan
+  const selectedHsp = hospitals.find(h => h.id === procState.selectedHspId) || hospitals[0] || { id: 'hsp-004', name: 'โรงพยาบาลขุขันธ์', district: 'ขุขันธ์', level: 'รพช.' };
+  const currentPlan = plans.find(p => p.hospitalId === selectedHsp.id && p.fiscalYear === procState.curYear) || {
+    hospitalId: selectedHsp.id,
+    hospitalName: selectedHsp.name,
+    fiscalYear: procState.curYear,
+    categories: {},
+    totalValue: 0,
+    totalItems: 0,
+    attachment: null,
+    tracking: { planSubmission: 'ส่ง', maintenancePlan: 'เรียบร้อย', scorePeriod: 'oct_nov', score: 3, secPass: true, fileDown: true, returned: true }
+  };
+
+  const prevPlan = plans.find(p => p.hospitalId === selectedHsp.id && p.fiscalYear === procState.prevYear);
+
+  // Group categories into 3 main groups for clean input layout
+  const drugCats = categories.filter(c => c.group === 'ยาแผนปัจจุบัน');
+  const herbalCats = categories.filter(c => c.group === 'ยาสมุนไพรและวัตถุดิบ');
+  const medSupplyCats = categories.filter(c => c.group === 'เวชภัณฑ์และวัสดุการแพทย์');
+
+  // Format currency helpers
+  const fmtM = val => (val / 1_000_000).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtBaht = val => (Number(val) || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtInt = val => (Number(val) || 0).toLocaleString('th-TH');
+
+  // Diff tag helper
+  const diffBadge = (pct, diffVal, showDiff = true) => {
+    const isUp = pct > 0;
+    const isDown = pct < 0;
+    const cls = isUp ? 'up' : isDown ? 'down' : 'neutral';
+    const sign = isUp ? '+' : '';
+    const iconSym = isUp ? icon('trendingUp') : isDown ? icon('trendingDown') : '';
+    return `<span class="proc-diff-tag ${cls}">${iconSym} ${sign}${pct.toFixed(1)}%${showDiff && diffVal !== undefined ? ` (${sign}฿${(diffVal / 1_000_000).toFixed(2)}M)` : ''}</span>`;
+  };
+
+  const actionButtons = `
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <button class="button secondary small" id="btn-batch-paste" type="button">${icon('upload')} วางข้อมูลทั้งจังหวัดจาก Excel</button>
+      <a class="button secondary small" href="/api/export/procurement.csv?year=${procState.curYear}" target="_blank">${icon('download')} ส่งออก Excel (CSV)</a>
+      <button class="button secondary small" id="btn-reset-seed" type="button">${icon('refresh')} รีเซ็ตค่าเริ่มต้น (PDF)</button>
+    </div>
+  `;
+
+  // Render HTML structure
+  $('#main-content').innerHTML = `
+    ${pageHead('file', 'blue', 'แผนจัดซื้อยาและเวชภัณฑ์ทั้งจังหวัด (22 โรงพยาบาล)', `วิเคราะห์เปรียบเทียบมูลค่าแผนการจัดซื้อระดับจังหวัดปี ${procState.curYear} เทียบกับปี ${procState.prevYear} และจัดการข้อมูลทั้ง 22 โรงพยาบาล จ.ศรีสะเกษ`, actionButtons)}
+
+    <!-- Top KPI Highlights -->
+    <div class="grid" style="grid-template-columns:repeat(3, 1fr);gap:16px;margin-bottom:20px;">
+      ${kpi('boxes', '', `มูลค่าจัดซื้อรวมทั้งจังหวัดปี ${procState.curYear}`, `฿${fmtM(summary.currentTotalValue)}M`, `${fmtInt(summary.currentTotalItems)} รายการ (${hospitals.length} รพ.)`)}
+      ${kpi(summary.growthPct >= 0 ? 'activity' : 'clock', summary.growthPct >= 0 ? 'orange' : 'blue', `ปี ${procState.curYear} เทียบกับปี ${procState.prevYear}`, `${summary.growthPct >= 0 ? '+' : ''}${summary.growthPct.toFixed(1)}%`, `ส่วนต่าง ${summary.diffValue >= 0 ? '+' : ''}฿${fmtM(summary.diffValue)}M`)}
+      ${kpi('package', 'blue', 'หมวดหมู่งบสูงสุดทั้งจังหวัด', summary.topCategory ? summary.topCategory.shortName : '-', `฿${fmtM(summary.topCategory?.currentValue || 0)}M (${summary.topCategory?.sharePct || 0}%)`)}
+    </div>
+
+    <!-- Main 40 / 60 Split Container -->
+    <div class="proc-split-layout">
+      
+      <!-- ══════════════════════════════════════════
+           LEFT COLUMN (42%): INPUT & EDIT PANEL
+           ══════════════════════════════════════════ -->
+      <section class="proc-input-card">
+        <div class="proc-input-head">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+            <div>
+              <h2>${icon('edit')} จัดการแผนจัดซื้อโรงพยาบาล</h2>
+              <p>เลือกวิธีบันทึกข้อมูล: กรอกฟอร์มเอง, แนบไฟล์ หรือวางข้อมูลด่วน</p>
+            </div>
+            <div style="display:flex;gap:5px;align-items:center;">
+              <label style="font-size:11px;font-weight:700;color:var(--muted)">ปีงบฯ:</label>
+              <select id="proc-select-year" class="control" style="width:78px;height:32px;font-size:11.5px;font-weight:750;">
+                ${years.map(y => `<option value="${y}" ${y === procState.curYear ? 'selected' : ''}>${y}</option>`).join('')}
+              </select>
+              <button type="button" class="button secondary small" id="btn-add-year-left" style="height:32px;padding:0 7px;font-size:11px;" title="เพิ่มปีงบประมาณใหม่">
+                ${icon('plus')}
+              </button>
+            </div>
+          </div>
+
+          <div style="margin-top:12px;">
+            <label class="field compact">
+              <span>เลือกโรงพยาบาล (22 แห่ง):</span>
+              <select id="proc-select-hospital" class="control" style="font-weight:700;font-size:12.5px;">
+                ${hospitals.map(h => `<option value="${h.id}" ${h.id === selectedHsp.id ? 'selected' : ''}>${esc(h.name)} (${h.level || 'รพช.'} - ${h.district || ''})</option>`).join('')}
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <!-- Input Mode Switcher Tabs -->
+        <div class="proc-input-mode-tabs">
+          <button type="button" class="proc-mode-btn ${procState.inputMode === 'manual' ? 'active' : ''}" data-proc-mode="manual">
+            ${icon('edit')} กรอกฟอร์มเอง
+          </button>
+          <button type="button" class="proc-mode-btn ${procState.inputMode === 'upload' ? 'active' : ''}" data-proc-mode="upload">
+            ${icon('upload')} แนบไฟล์
+          </button>
+          <button type="button" class="proc-mode-btn ${procState.inputMode === 'paste' ? 'active' : ''}" data-proc-mode="paste">
+            ${icon('clipboard')} วางข้อมูลด่วน
+          </button>
+        </div>
+
+        <!-- Live Totals Banner -->
+        <div class="proc-live-banner" id="proc-live-banner">
+          <div>
+            <small>รวมมูลค่าแผนจัดซื้อปี ${procState.curYear}</small>
+            <strong id="proc-live-total-val">฿${fmtBaht(currentPlan.totalValue)}</strong>
+          </div>
+          <div class="proc-live-items">
+            <div><span id="proc-live-total-items">${fmtInt(currentPlan.totalItems)}</span> รายการ</div>
+            ${prevPlan ? `<div style="font-size:10px;color:#a7f3d0;margin-top:2px;">ปี ${procState.prevYear}: ฿${fmtM(prevPlan.totalValue)}M</div>` : ''}
+          </div>
+        </div>
+
+        <!-- ════════ MODE 1: MANUAL FORM ════════ -->
+        <form id="proc-input-form" class="proc-form-body" ${procState.inputMode !== 'manual' ? 'style="display:none;"' : ''}>
+          
+          ${currentPlan.attachment ? `
+            <div class="proc-attached-file-card" style="margin-bottom:12px;">
+              <div class="proc-attached-file-info">
+                <span class="page-icon green" style="width:30px;height:30px;">${icon('file')}</span>
+                <div>
+                  <strong>${esc(currentPlan.attachment.name)}</strong>
+                  <small>${Math.round((currentPlan.attachment.size || 0) / 1024)} KB · แนบเมื่อ ${new Date(currentPlan.attachment.uploadedAt || currentPlan.updatedAt).toLocaleDateString('th-TH')}</small>
+                </div>
+              </div>
+              <a href="${currentPlan.attachment.data}" download="${esc(currentPlan.attachment.name)}" class="button secondary small" style="height:28px;padding:0 8px;font-size:10.5px;">
+                ${icon('download')} ดาวน์โหลด
+              </a>
+            </div>` : ''}
+
+          <!-- 1. ยาแผนปัจจุบัน -->
+          <div class="proc-group-sec">
+            <div class="proc-group-sec-title">
+              <span>💊 กลุ่มยาแผนปัจจุบัน</span>
+              <span class="pill drug">5 หมวด</span>
+            </div>
+            ${drugCats.map(cat => {
+              const item = currentPlan.categories?.[cat.id] || { count: 0, value: 0 };
+              const countStr = item.count ? Number(item.count).toLocaleString('th-TH') : '';
+              const valStr = item.value ? Number(item.value).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '';
+              return `
+                <div class="proc-cat-item">
+                  <div class="proc-cat-name">
+                    <span>${esc(cat.name)}</span>
+                    <small>${esc(cat.shortName)}</small>
+                  </div>
+                  <div class="proc-inputs-pair">
+                    <div class="proc-input-col">
+                      <label>จำนวน (รายการ)</label>
+                      <input type="text" inputmode="numeric" class="proc-number-input" name="count_${cat.id}" data-cat="${cat.id}" data-field="count" value="${countStr}" placeholder="0">
+                    </div>
+                    <div class="proc-input-col">
+                      <label>มูลค่า (บาท)</label>
+                      <input type="text" inputmode="decimal" class="proc-currency-input" name="val_${cat.id}" data-cat="${cat.id}" data-field="value" value="${valStr}" placeholder="0.00">
+                    </div>
+                  </div>
+                </div>`;
+            }).join('')}
+          </div>
+
+          <!-- 2. ยาสมุนไพรและวัตถุดิบ -->
+          <div class="proc-group-sec">
+            <div class="proc-group-sec-title">
+              <span>🌿 กลุ่มยาสมุนไพรและวัตถุดิบ</span>
+              <span class="pill herbal">4 หมวด</span>
+            </div>
+            ${herbalCats.map(cat => {
+              const item = currentPlan.categories?.[cat.id] || { count: 0, value: 0 };
+              const countStr = item.count ? Number(item.count).toLocaleString('th-TH') : '';
+              const valStr = item.value ? Number(item.value).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '';
+              return `
+                <div class="proc-cat-item">
+                  <div class="proc-cat-name">
+                    <span>${esc(cat.name)}</span>
+                    <small>${esc(cat.shortName)}</small>
+                  </div>
+                  <div class="proc-inputs-pair">
+                    <div class="proc-input-col">
+                      <label>จำนวน (รายการ)</label>
+                      <input type="text" inputmode="numeric" class="proc-number-input" name="count_${cat.id}" data-cat="${cat.id}" data-field="count" value="${countStr}" placeholder="0">
+                    </div>
+                    <div class="proc-input-col">
+                      <label>มูลค่า (บาท)</label>
+                      <input type="text" inputmode="decimal" class="proc-currency-input" name="val_${cat.id}" data-cat="${cat.id}" data-field="value" value="${valStr}" placeholder="0.00">
+                    </div>
+                  </div>
+                </div>`;
+            }).join('')}
+          </div>
+
+          <!-- 3. เวชภัณฑ์และวัสดุการแพทย์ -->
+          <div class="proc-group-sec">
+            <div class="proc-group-sec-title">
+              <span>🩺 กลุ่มเวชภัณฑ์และวัสดุการแพทย์</span>
+              <span class="pill medSupply">5 หมวด</span>
+            </div>
+            ${medSupplyCats.map(cat => {
+              const item = currentPlan.categories?.[cat.id] || { count: 0, value: 0 };
+              const countStr = item.count ? Number(item.count).toLocaleString('th-TH') : '';
+              const valStr = item.value ? Number(item.value).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '';
+              return `
+                <div class="proc-cat-item">
+                  <div class="proc-cat-name">
+                    <span>${esc(cat.name)}</span>
+                    <small>${esc(cat.shortName)}</small>
+                  </div>
+                  <div class="proc-inputs-pair">
+                    <div class="proc-input-col">
+                      <label>จำนวน (รายการ)</label>
+                      <input type="text" inputmode="numeric" class="proc-number-input" name="count_${cat.id}" data-cat="${cat.id}" data-field="count" value="${countStr}" placeholder="0">
+                    </div>
+                    <div class="proc-input-col">
+                      <label>มูลค่า (บาท)</label>
+                      <input type="text" inputmode="decimal" class="proc-currency-input" name="val_${cat.id}" data-cat="${cat.id}" data-field="value" value="${valStr}" placeholder="0.00">
+                    </div>
+                  </div>
+                </div>`;
+            }).join('')}
+          </div>
+
+          <!-- Save Button -->
+          <div style="margin-top:14px;position:sticky;bottom:0;background:linear-gradient(180deg,rgba(255,255,255,0.8),#ffffff);padding-top:8px;">
+            <button type="submit" id="btn-save-proc-plan" class="button primary wide" style="height:42px;font-size:13px;font-weight:700;">
+              ${icon('save')} บันทึกข้อมูลแผนจัดซื้อ
+            </button>
+          </div>
+        </form>
+
+        <!-- ════════ MODE 2: FILE UPLOAD & ATTACHMENT ════════ -->
+        <div id="proc-upload-sec" class="proc-form-body" ${procState.inputMode !== 'upload' ? 'style="display:none;"' : ''}>
+          <div class="proc-upload-zone" id="proc-dropzone">
+            <input type="file" id="proc-file-input" style="display:none;" accept=".xlsx,.xls,.csv,.pdf,.txt,.doc,.docx,image/*">
+            <div class="page-icon blue" style="width:48px;height:48px;">${icon('upload')}</div>
+            <strong style="font-size:13.5px;color:var(--ink);">คลิกหรือลากไฟล์มาวางที่นี่</strong>
+            <p style="font-size:11px;color:var(--muted);margin:0;">รองรับไฟล์ Excel (.xlsx, .xls), CSV, PDF, Word หรือรูปภาพเอกสาร (สูงสุด 20MB)</p>
+            <button type="button" class="button secondary small" id="btn-choose-file" style="margin-top:6px;">
+              ${icon('file')} เลือกไฟล์จากคอมพิวเตอร์
+            </button>
+          </div>
+
+          <!-- Staged or Current Attached File Card -->
+          <div id="proc-file-status-box">
+            ${currentPlan.attachment ? `
+              <div class="proc-attached-file-card">
+                <div class="proc-attached-file-info">
+                  <span class="page-icon green" style="width:34px;height:34px;">${icon('file')}</span>
+                  <div>
+                    <strong>${esc(currentPlan.attachment.name)}</strong>
+                    <small>${Math.round((currentPlan.attachment.size || 0) / 1024)} KB · ${esc(currentPlan.attachment.type || 'เอกสารแนบ')}</small>
+                  </div>
+                </div>
+                <div style="display:flex;gap:6px;">
+                  <a href="${currentPlan.attachment.data}" download="${esc(currentPlan.attachment.name)}" class="button secondary small" style="height:30px;padding:0 9px;">
+                    ${icon('download')} ดาวน์โหลด
+                  </a>
+                  <button type="button" class="button danger small" id="btn-delete-attachment" style="height:30px;padding:0 9px;">
+                    ${icon('trash')} ลบ
+                  </button>
+                </div>
+              </div>` : `
+              <div style="text-align:center;padding:18px;color:var(--muted);font-size:11.5px;background:#f8fafc;border-radius:10px;border:1px dashed #e2e8f0;">
+                ยังไม่มีไฟล์แนบสำหรับ ${selectedHsp.name} ปีงบประมาณ ${procState.curYear}
+              </div>`}
+          </div>
+
+          <div id="proc-upload-actions" style="margin-top:16px;display:none;">
+            <button type="button" id="btn-save-uploaded-file" class="button primary wide" style="height:44px;font-size:13.5px;">
+              ${icon('save')} บันทึกแนบไฟล์กับแผนจัดซื้อ
+            </button>
+          </div>
+        </div>
+
+        <!-- ════════ MODE 3: QUICK PASTE ════════ -->
+        <div id="proc-paste-sec" class="proc-form-body" ${procState.inputMode !== 'paste' ? 'style="display:none;"' : ''}>
+          <div class="proc-paste-box">
+            <div style="font-size:11.5px;color:var(--muted);margin-bottom:10px;">
+              <strong>คำแนะนำ:</strong> คัดลอกแถวตัวเลขมูลค่าจัดซื้อของ <strong>${selectedHsp.name}</strong> จาก Excel แล้ววางลงในช่องด้านล่าง ระบบจะถอดรหัสตัวเลขและจัดลง 14 หมวดหมู่ให้อัตโนมัติ
+            </div>
+            <label class="field compact">
+              <span>วางข้อความตาราง (TSV / CSV):</span>
+              <textarea id="proc-single-paste-text" style="height:110px;font-family:monospace;font-size:11px;" placeholder="417	1782452.70	98	8274468	12	387600	..."></textarea>
+            </label>
+            <div id="proc-paste-preview" style="margin-top:12px;font-size:11px;"></div>
+            <div style="margin-top:14px;">
+              <button type="button" id="btn-apply-single-paste" class="button primary wide" style="height:42px;font-size:13px;">
+                ${icon('check')} นำข้อมูลใส่ฟอร์มและบันทึกทันที
+              </button>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ══════════════════════════════════════════
+           RIGHT COLUMN (58%): COMPARATIVE ANALYTICS
+           ══════════════════════════════════════════ -->
+      <section class="proc-analysis-area">
+        
+        <!-- Navigation View Tabs -->
+        <div class="proc-nav-tabs">
+          <button class="proc-tab-btn ${procState.activeTab === 'comparison' ? 'active' : ''}" data-proc-tab="comparison" type="button">
+            ${icon('chart')} วิเคราะห์เปรียบเทียบรายปี
+          </button>
+          <button class="proc-tab-btn ${procState.activeTab === 'hospitals' ? 'active' : ''}" data-proc-tab="hospitals" type="button">
+            ${icon('hospital')} อันดับและเปรียบเทียบ 22 รพ.
+          </button>
+          <button class="proc-tab-btn ${procState.activeTab === 'master' ? 'active' : ''}" data-proc-tab="master" type="button">
+            ${icon('table')} ตารางสรุปแผนจัดซื้อทั้งจังหวัด
+          </button>
+        </div>
+
+        <!-- TAB 1: YoY COMPARISON ANALYTICS -->
+        <div id="proc-tab-content-comparison" ${procState.activeTab !== 'comparison' ? 'hidden' : ''}>
+          
+          <!-- 3 Main Category Groups Summary Cards -->
+          <div class="proc-group-bars">
+            ${groupComparison.map(grp => `
+              <div class="proc-group-bar-card">
+                <div class="header">
+                  <span style="color:${grp.color}">● ${esc(grp.name)}</span>
+                  ${diffBadge(grp.growthPct, grp.diffValue, false)}
+                </div>
+                <div class="val">฿${fmtM(grp.currentValue)}M</div>
+                <div class="sub">
+                  <span>สัดส่วน: <strong>${grp.sharePct}%</strong></span>
+                  <span>ปีก่อน: ฿${fmtM(grp.previousValue)}M</span>
+                </div>
+              </div>`).join('')}
+          </div>
+
+          <!-- Comprehensive Filter & Year Comparison Controls -->
+          <div class="proc-filter-card">
+            <div class="proc-filter-row">
+              <div class="proc-filter-group">
+                <span class="proc-filter-label">${icon('calendar')} เลือกปีเปรียบเทียบ:</span>
+                
+                <!-- Multi-Year Selector Dropdown -->
+                <div class="proc-dropdown-wrapper" id="proc-year-dropdown-wrapper">
+                  <button type="button" class="proc-dropdown-btn" id="btn-toggle-year-dropdown" style="min-width:185px;">
+                    <span style="display:flex;align-items:center;gap:6px;">
+                      <span>${procState.selectedYears.length} ปี (${procState.selectedYears.map(y => `ปี ${y}`).join(', ')})</span>
+                    </span>
+                    ${icon('chevronDown')}
+                  </button>
+                  <div class="proc-dropdown-menu" id="proc-year-dropdown-menu" hidden style="width:250px;">
+                    <div class="proc-dropdown-head">
+                      <span style="font-weight:700;font-size:11px;color:var(--ink);">เลือกปีงบประมาณที่ต้องการเทียบ</span>
+                      <div style="display:flex;gap:4px;">
+                        <button type="button" id="btn-select-all-years" class="button subtle small" style="font-size:10px;padding:2px 6px;">เลือกทุกปี</button>
+                        <button type="button" id="btn-default-years" class="button subtle small" style="font-size:10px;padding:2px 6px;">2 ปีล่าสุด</button>
+                      </div>
+                    </div>
+                    <div class="proc-dropdown-body">
+                      ${years.map(y => {
+                        const isChecked = procState.selectedYears.includes(y);
+                        const yColor = getYearColor(y);
+                        return `
+                          <label class="proc-dropdown-item ${isChecked ? 'active' : ''}">
+                            <input type="checkbox" class="proc-year-checkbox" value="${y}" ${isChecked ? 'checked' : ''}>
+                            <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${yColor};margin-right:2px;"></span>
+                            <span>ปีงบประมาณ ${y}</span>
+                          </label>`;
+                      }).join('')}
+                    </div>
+                    <div class="proc-dropdown-footer">
+                      <button type="button" id="btn-cancel-year-dropdown" class="button subtle small" style="font-size:11px;padding:4px 8px;">ยกเลิก</button>
+                      <button type="button" id="btn-apply-year-dropdown" class="button primary small" style="font-size:11.5px;padding:4px 14px;font-weight:700;">${icon('check')} ยืนยันปีที่เลือก</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="proc-filter-group">
+                <!-- Dropdown with Checkboxes inside -->
+                <div class="proc-dropdown-wrapper" id="proc-cat-dropdown-wrapper">
+                  <button type="button" class="proc-dropdown-btn" id="btn-toggle-cat-dropdown">
+                    <span style="display:flex;align-items:center;gap:6px;">
+                      ${icon('package')}
+                      <span>เลือกหมวดหมู่ (${!procState.selectedCategoryIds.length ? categories.length : procState.selectedCategoryIds.includes('__none__') ? 0 : procState.selectedCategoryIds.length}/${categories.length})</span>
+                    </span>
+                    ${icon('chevronDown')}
+                  </button>
+                  <div class="proc-dropdown-menu" id="proc-cat-dropdown-menu" hidden>
+                    <div class="proc-dropdown-head">
+                      <span style="font-weight:700;font-size:11px;color:var(--ink);">เลือกหมวดหมู่ที่ต้องการ</span>
+                      <div style="display:flex;gap:4px;">
+                        <button type="button" id="btn-select-all-cats" class="button subtle small" style="font-size:10px;padding:2px 6px;">เลือกทั้งหมด</button>
+                        <button type="button" id="btn-clear-all-cats" class="button subtle small" style="font-size:10px;padding:2px 6px;">ล้าง</button>
+                      </div>
+                    </div>
+                    <div class="proc-dropdown-body">
+                      <!-- 1. ยาแผนปัจจุบัน -->
+                      <div class="proc-dropdown-group-title">💊 กลุ่มยาแผนปัจจุบัน (5)</div>
+                      ${drugCats.map(cat => {
+                        const isChecked = !procState.selectedCategoryIds.length || procState.selectedCategoryIds.includes(cat.id);
+                        return `
+                          <label class="proc-dropdown-item ${isChecked ? 'active' : ''}">
+                            <input type="checkbox" class="proc-cat-checkbox" value="${cat.id}" ${isChecked ? 'checked' : ''}>
+                            <span>${esc(cat.shortName)}</span>
+                          </label>`;
+                      }).join('')}
+
+                      <!-- 2. ยาสมุนไพรและวัตถุดิบ -->
+                      <div class="proc-dropdown-group-title">🌿 กลุ่มยาสมุนไพรและวัตถุดิบ (4)</div>
+                      ${herbalCats.map(cat => {
+                        const isChecked = !procState.selectedCategoryIds.length || procState.selectedCategoryIds.includes(cat.id);
+                        return `
+                          <label class="proc-dropdown-item ${isChecked ? 'active' : ''}">
+                            <input type="checkbox" class="proc-cat-checkbox" value="${cat.id}" ${isChecked ? 'checked' : ''}>
+                            <span>${esc(cat.shortName)}</span>
+                          </label>`;
+                      }).join('')}
+
+                      <!-- 3. เวชภัณฑ์และวัสดุการแพทย์ -->
+                      <div class="proc-dropdown-group-title">🩺 กลุ่มเวชภัณฑ์และวัสดุการแพทย์ (5)</div>
+                      ${medSupplyCats.map(cat => {
+                        const isChecked = !procState.selectedCategoryIds.length || procState.selectedCategoryIds.includes(cat.id);
+                        return `
+                          <label class="proc-dropdown-item ${isChecked ? 'active' : ''}">
+                            <input type="checkbox" class="proc-cat-checkbox" value="${cat.id}" ${isChecked ? 'checked' : ''}>
+                            <span>${esc(cat.shortName)}</span>
+                          </label>`;
+                      }).join('')}
+                    </div>
+                    <div class="proc-dropdown-footer">
+                      <button type="button" id="btn-cancel-cat-dropdown" class="button subtle small" style="font-size:11px;padding:4px 8px;">ยกเลิก</button>
+                      <button type="button" id="btn-apply-cat-dropdown" class="button primary small" style="font-size:11.5px;padding:4px 14px;font-weight:700;">${icon('check')} ยืนยันการเลือก</button>
+                    </div>
+                  </div>
+                </div>
+
+                <select id="proc-filter-growth" class="control" style="width:125px;height:32px;font-size:11px;">
+                  <option value="all" ${procState.growthFilter === 'all' ? 'selected' : ''}>ทั้งหมดทุกทิศทาง</option>
+                  <option value="up" ${procState.growthFilter === 'up' ? 'selected' : ''}>📈 งบเพิ่มขึ้น (+)</option>
+                  <option value="down" ${procState.growthFilter === 'down' ? 'selected' : ''}>📉 งบลดลง (-)</option>
+                  <option value="top5" ${procState.growthFilter === 'top5' ? 'selected' : ''}>🎯 5 อันดับงบสูงสุด</option>
+                </select>
+
+                <select id="proc-filter-sort" class="control" style="width:135px;height:32px;font-size:11px;">
+                  <option value="default" ${procState.sortBy === 'default' ? 'selected' : ''}>ลำดับมาตรฐาน</option>
+                  <option value="value_desc" ${procState.sortBy === 'value_desc' ? 'selected' : ''}>มูลค่างบประมาณ (มาก→น้อย)</option>
+                  <option value="pct_desc" ${procState.sortBy === 'pct_desc' ? 'selected' : ''}>อัตราเพิ่มขึ้นสูงสุด (%)</option>
+                  <option value="pct_asc" ${procState.sortBy === 'pct_asc' ? 'selected' : ''}>อัตราลดลงมากสุด (%)</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Group Quick Filter Pills -->
+            <div class="proc-filter-row" style="padding-top:2px;">
+              <div class="proc-filter-group">
+                <span class="proc-filter-label">กลุ่มหลัก:</span>
+                <button type="button" class="button small ${procState.filterGroup === 'all' ? 'primary' : 'secondary'}" data-filter-group="all" style="height:27px;padding:0 9px;font-size:11px;">ทั้งหมด (14)</button>
+                <button type="button" class="button small ${procState.filterGroup === 'ยาแผนปัจจุบัน' ? 'primary' : 'secondary'}" data-filter-group="ยาแผนปัจจุบัน" style="height:27px;padding:0 9px;font-size:11px;">💊 ยาแผนปัจจุบัน</button>
+                <button type="button" class="button small ${procState.filterGroup === 'ยาสมุนไพรและวัตถุดิบ' ? 'primary' : 'secondary'}" data-filter-group="ยาสมุนไพรและวัตถุดิบ" style="height:27px;padding:0 9px;font-size:11px;">🌿 ยาสมุนไพร</button>
+                <button type="button" class="button small ${procState.filterGroup === 'เวชภัณฑ์และวัสดุการแพทย์' ? 'primary' : 'secondary'}" data-filter-group="เวชภัณฑ์และวัสดุการแพทย์" style="height:27px;padding:0 9px;font-size:11px;">🩺 เวชภัณฑ์</button>
+              </div>
+
+              ${(procState.filterGroup !== 'all' || procState.selectedCategoryIds.length || procState.growthFilter !== 'all' || procState.sortBy !== 'default' || procState.selectedYears.length > 2) ? `
+                <button type="button" id="btn-reset-all-filters" class="button subtle small" style="font-size:11px;color:var(--red);">
+                  ${icon('refresh')} ล้างตัวกรองทั้งหมด
+                </button>` : ''}
+            </div>
+          </div>
+
+          <!-- Category Comparison Chart Box -->
+          <div class="proc-compare-box">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+              <div>
+                <h3 style="font-size:13.5px;font-weight:750;margin:0 0 2px;">เปรียบเทียบมูลค่าแผนจัดซื้อตามหมวดหมู่ (${displayedCategories.length} หมวดที่แสดง, เปรียบเทียบ ${procState.selectedYears.length} ปี)</h3>
+                <p style="font-size:11px;color:var(--muted);margin:0;">แสดงแท่งเปรียบเทียบมูลค่าแต่ละปีงบประมาณที่เลือก</p>
+              </div>
+              <div style="display:flex;gap:12px;font-size:11px;align-items:center;flex-wrap:wrap;">
+                ${procState.selectedYears.map(yr => `
+                  <span style="display:inline-flex;align-items:center;gap:4px;">
+                    <span style="width:10px;height:10px;background:${getYearColor(yr)};border-radius:2px;"></span>
+                    ปี ${yr}
+                  </span>
+                `).join('')}
+              </div>
+            </div>
+
+            <div class="proc-chart-container">
+              ${(() => {
+                if (!displayedCategories.length) {
+                  return '<div style="text-align:center;padding:24px;color:var(--muted);font-size:12px;">ไม่พบหมวดหมู่ที่ตรงกับตัวกรองที่เลือก</div>';
+                }
+                const allValues = [];
+                displayedCategories.forEach(c => {
+                  procState.selectedYears.forEach(yr => {
+                    allValues.push(c.yearValues[yr]?.value || 0);
+                  });
+                });
+                const maxVal = Math.max(1, ...allValues);
+                return displayedCategories.map(cat => {
+                  return `
+                    <div class="proc-cat-chart-row">
+                      <div class="proc-cat-label" title="${esc(cat.name)}">
+                        ${esc(cat.shortName)}
+                        <small>฿${fmtM(cat.currentValue)}M (${cat.sharePct}%)</small>
+                      </div>
+                      <div class="proc-bars-stack">
+                        ${procState.selectedYears.map(yr => {
+                          const yVal = cat.yearValues[yr]?.value || 0;
+                          const yPct = Math.min(100, Math.max(2, (yVal / maxVal) * 100));
+                          const yColor = getYearColor(yr);
+                          return `
+                            <div class="proc-bar-line" title="ปี ${yr}: ฿${fmtBaht(yVal)}">
+                              <div class="proc-bar-fill" style="width:${yPct.toFixed(1)}%;background:${yColor};"></div>
+                            </div>`;
+                        }).join('')}
+                      </div>
+                      <div style="text-align:right;">
+                        ${diffBadge(cat.growthPct, cat.diffValue, false)}
+                      </div>
+                    </div>`;
+                }).join('');
+              })()}
+            </div>
+          </div>
+
+          <!-- Category Comparison Breakdown Table -->
+          <div class="card table-card">
+            <div class="card-head" style="padding:16px 20px 0;">
+              <div>
+                <h2>ตารางแจกแจงเปรียบเทียบมูลค่ารายหมวดหมู่ (${displayedCategories.length} รายการ)</h2>
+                <p>แสดงมูลค่า ผลต่าง ส่วนแบ่ง และอัตราการเปลี่ยนแปลงเทียบปีก่อนหน้า</p>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>หมวดหมู่แผนจัดซื้อ</th>
+                    <th>กลุ่ม</th>
+                    ${procState.selectedYears.map(yr => `
+                      <th class="number" style="color:${getYearColor(yr)};font-weight:750;">
+                        ปี ${yr} (บาท)
+                      </th>
+                    `).join('')}
+                    <th class="number">ผลต่าง (${procState.curYear} vs ${procState.prevYear})</th>
+                    <th class="number">อัตราการเปลี่ยนแปลง</th>
+                    <th class="number">สัดส่วน %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${displayedCategories.length ? displayedCategories.map(c => `
+                    <tr>
+                      <td><strong>${esc(c.name)}</strong></td>
+                      <td><span class="pill ${c.group === 'ยาแผนปัจจุบัน' ? 'drug' : c.group === 'ยาสมุนไพรและวัตถุดิบ' ? 'herbal' : 'medSupply'}">${esc(c.group)}</span></td>
+                      ${procState.selectedYears.map(yr => `
+                        <td class="number stock-number" style="font-size:12px;">฿${fmtBaht(c.yearValues[yr]?.value || 0)}</td>
+                      `).join('')}
+                      <td class="number" style="color:${c.diffValue >= 0 ? 'var(--green-dark)' : 'var(--red)'};font-weight:700;">
+                        ${c.diffValue >= 0 ? '+' : ''}฿${fmtBaht(c.diffValue)}
+                      </td>
+                      <td class="number">${diffBadge(c.growthPct, c.diffValue, false)}</td>
+                      <td class="number"><strong>${c.sharePct}%</strong></td>
+                    </tr>`).join('') : `<tr><td colspan="${4 + procState.selectedYears.length}" class="table-empty">ไม่พบข้อมูลหมวดหมู่ที่เลือก</td></tr>`}
+                </tbody>
+                <tfoot>
+                  <tr style="background:#f8fafc;font-weight:800;">
+                    <td colspan="2">รวมมูลค่าหมวดหมู่ที่แสดง (${displayedCategories.length} หมวด)</td>
+                    ${procState.selectedYears.map(yr => {
+                      const yrSum = displayedCategories.reduce((s, c) => s + (c.yearValues[yr]?.value || 0), 0);
+                      return `<td class="number" style="color:var(--ink);font-size:12.5px;">฿${fmtBaht(yrSum)}</td>`;
+                    }).join('')}
+                    <td class="number" style="color:${displayedCategories.reduce((s, c) => s + c.diffValue, 0) >= 0 ? 'var(--green-dark)' : 'var(--red)'};">
+                      ${displayedCategories.reduce((s, c) => s + c.diffValue, 0) >= 0 ? '+' : ''}฿${fmtBaht(displayedCategories.reduce((s, c) => s + c.diffValue, 0))}
+                    </td>
+                    <td class="number">
+                      ${(() => {
+                        const curSum = displayedCategories.reduce((s, c) => s + (c.yearValues[procState.curYear]?.value || 0), 0);
+                        const prevSum = displayedCategories.reduce((s, c) => s + (c.yearValues[procState.prevYear]?.value || 0), 0);
+                        const gPct = prevSum > 0 ? ((curSum - prevSum) / prevSum) * 100 : 0;
+                        return diffBadge(gPct, curSum - prevSum, false);
+                      })()}
+                    </td>
+                    <td class="number">${displayedCategories.reduce((s, c) => s + c.sharePct, 0).toFixed(1)}%</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 2: HOSPITAL RANKINGS & COMPARISON -->
+        <div id="proc-tab-content-hospitals" ${procState.activeTab !== 'hospitals' ? 'hidden' : ''}>
+          <div class="card" style="padding:16px 20px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;">
+            <div>
+              <h2 style="font-size:14px;margin:0 0 3px;">จัดอันดับมูลค่าแผนจัดซื้อ 22 โรงพยาบาล จ.ศรีสะเกษ</h2>
+              <p style="font-size:11px;color:var(--muted);margin:0;">คลิกปุ่ม "แก้ไข" เพื่อเลือกโรงพยาบาลและแก้ไขแผนจัดซื้อในฝั่งซ้ายได้ทันที</p>
+            </div>
+            <div style="font-size:11px;color:var(--muted);">
+              รวมทั้งหมด: <strong>฿${fmtM(summary.currentTotalValue)}M</strong>
+            </div>
+          </div>
+
+          <div class="proc-rank-list">
+            ${hospitalRanking.map((h, idx) => {
+              const maxHspVal = hospitalRanking[0]?.currentValue || 1;
+              const barWidth = Math.min(100, Math.max(3, (h.currentValue / maxHspVal) * 100));
+              const isSelected = h.hospitalId === selectedHsp.id;
+              return `
+                <div class="proc-rank-card ${isSelected ? 'selected' : ''}" style="${isSelected ? 'border-color:var(--green);box-shadow:0 0 0 2px rgba(12,154,118,0.2);' : ''}">
+                  <div class="proc-rank-num ${idx === 0 ? 'top1' : idx === 1 ? 'top2' : idx === 2 ? 'top3' : ''}">#${idx + 1}</div>
+                  <div>
+                    <div style="display:flex;align-items:center;gap:6px;">
+                      <strong style="font-size:13px;color:var(--ink);">${esc(h.hospitalName)}</strong>
+                      <span class="pill" style="font-size:8.5px;">${esc(h.level)}</span>
+                    </div>
+                    <div class="proc-bar-line" style="margin-top:6px;height:7px;" title="สัดส่วนงบประมาณ: ${h.sharePct}%">
+                      <div class="proc-bar-fill cur" style="width:${barWidth}%;"></div>
+                    </div>
+                  </div>
+                  <div style="text-align:right;">
+                    <div style="font-weight:800;font-size:12.5px;color:var(--green-dark);">฿${fmtM(h.currentValue)}M</div>
+                    <small style="color:var(--muted);font-size:9.5px;">ปีก่อน: ฿${fmtM(h.previousValue)}M</small>
+                  </div>
+                  <div style="text-align:center;">
+                    ${diffBadge(h.growthPct, h.diffValue, false)}
+                    <div style="font-size:9.5px;color:var(--muted);margin-top:2px;">ส่วนแบ่ง ${h.sharePct}%</div>
+                  </div>
+                  <div style="text-align:right;">
+                    <button type="button" class="button secondary small proc-btn-select-hsp" data-hsp-id="${h.hospitalId}" style="padding:0 9px;height:30px;font-size:11px;">
+                      ${icon('edit')} แก้ไข
+                    </button>
+                  </div>
+                </div>`;
+            }).join('')}
+          </div>
+        </div>
+
+        <!-- TAB 3: PROVINCIAL MASTER MATRIX TABLE -->
+        <div id="proc-tab-content-master" ${procState.activeTab !== 'master' ? 'hidden' : ''}>
+          <div class="card table-card">
+            <div class="table-tools">
+              <div class="search">
+                ${icon('search')}
+                <input id="proc-matrix-search" placeholder="ค้นหาชื่อโรงพยาบาลในตาราง..." value="${esc(procState.searchQuery)}">
+              </div>
+              <div style="display:flex;gap:8px;margin-left:auto;">
+                <a class="button secondary small" href="/api/export/procurement.csv?year=${procState.curYear}" target="_blank">
+                  ${icon('download')} ดาวน์โหลดตาราง CSV
+                </a>
+              </div>
+            </div>
+            
+            <div class="table-wrap" style="max-height:600px;">
+              <table style="min-width:1300px;font-size:10.5px;">
+                <thead>
+                  <tr style="position:sticky;top:0;z-index:2;">
+                    <th style="width:40px;">ลำดับ</th>
+                    <th style="position:sticky;left:0;background:#f8fafc;z-index:3;min-width:150px;">โรงพยาบาล</th>
+                    ${categories.map(c => `<th class="number" style="min-width:95px;" title="${esc(c.name)}">${esc(c.shortName)}</th>`).join('')}
+                    <th class="number" style="min-width:85px;background:#eef8f5;">รวมรายการ</th>
+                    <th class="number" style="min-width:115px;background:#e2f5ee;">รวมมูลค่า (บาท)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${(() => {
+                    const filtered = hospitals.filter(h => !procState.searchQuery || h.name.includes(procState.searchQuery) || (h.district && h.district.includes(procState.searchQuery)));
+                    if (!filtered.length) return `<tr><td colspan="${categories.length + 4}" class="table-empty">ไม่พบข้อมูลโรงพยาบาลที่ค้นหา</td></tr>`;
+
+                    return filtered.map((h, idx) => {
+                      const p = plans.find(plan => plan.hospitalId === h.id && plan.fiscalYear === procState.curYear);
+                      const isSel = h.id === selectedHsp.id;
+                      return `
+                        <tr style="${isSel ? 'background:#edfbf6;' : ''}">
+                          <td>${idx + 1}</td>
+                          <td style="position:sticky;left:0;background:${isSel ? '#edfbf6' : '#fff'};font-weight:700;">
+                            <a href="javascript:void(0)" class="proc-link-hsp" data-hsp-id="${h.id}" style="color:var(--green-dark);">
+                              ${esc(h.name)}
+                            </a>
+                          </td>
+                          ${categories.map(c => {
+                            const val = p?.categories?.[c.id]?.value || 0;
+                            return `<td class="number" style="color:${val > 0 ? 'var(--ink)' : '#cbd5e1'}">${val > 0 ? fmtBaht(val) : '-'}</td>`;
+                          }).join('')}
+                          <td class="number" style="background:#f7fcfb;font-weight:700;">${fmtInt(p?.totalItems || 0)}</td>
+                          <td class="number" style="background:#f0faf6;font-weight:800;color:var(--green-dark);">฿${fmtBaht(p?.totalValue || 0)}</td>
+                        </tr>`;
+                    }).join('');
+                  })()}
+                </tbody>
+                <tfoot>
+                  <tr style="position:sticky;bottom:0;background:#e6f4f0;font-weight:800;z-index:2;">
+                    <td>-</td>
+                    <td style="position:sticky;left:0;background:#e6f4f0;z-index:3;">รวมทั้งจังหวัด</td>
+                    ${categories.map(c => {
+                      const colTotal = categoryComparison.find(cat => cat.id === c.id)?.currentValue || 0;
+                      return `<td class="number" style="color:var(--ink);">฿${fmtM(colTotal)}M</td>`;
+                    }).join('')}
+                    <td class="number" style="color:var(--green-dark);">${fmtInt(summary.currentTotalItems)}</td>
+                    <td class="number" style="color:var(--green-dark);font-size:12px;">฿${fmtBaht(summary.currentTotalValue)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        </div>
+
+      </section>
+    </div>
+  `;
+
+  // ══════════════════════════════════════════════════════════════
+  // EVENT LISTENERS & LIVE CALCULATIONS
+  // ══════════════════════════════════════════════════════════════
+
+  // 1. Hospital and Year Change
+  $('#proc-select-hospital').addEventListener('change', e => {
+    procState.selectedHspId = e.target.value;
+    procurementPage();
+  });
+
+  $('#proc-select-year').addEventListener('change', e => {
+    procState.curYear = Number(e.target.value);
+    procState.prevYear = procState.curYear === 2569 ? 2568 : procState.curYear - 1;
+    procurementPage();
+  });
+
+  // 1.2 Multi-Year Dropdown Selector
+  const yearDropdownBtn = $('#btn-toggle-year-dropdown');
+  const yearDropdownMenu = $('#proc-year-dropdown-menu');
+  const yearDropdownWrapper = $('#proc-year-dropdown-wrapper');
+
+  yearDropdownBtn?.addEventListener('click', e => {
+    e.stopPropagation();
+    const isHidden = yearDropdownMenu.hidden;
+    yearDropdownMenu.hidden = !isHidden;
+    yearDropdownBtn.classList.toggle('open', isHidden);
+    if (catDropdownMenu) catDropdownMenu.hidden = true;
+  });
+
+  yearDropdownMenu?.addEventListener('click', e => {
+    e.stopPropagation();
+  });
+
+  $$('.proc-year-checkbox').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const parentLabel = cb.closest('.proc-dropdown-item');
+      if (parentLabel) parentLabel.classList.toggle('active', cb.checked);
+    });
+  });
+
+  $('#btn-select-all-years')?.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    $$('.proc-year-checkbox').forEach(cb => {
+      cb.checked = true;
+      cb.closest('.proc-dropdown-item')?.classList.add('active');
+    });
+  });
+
+  $('#btn-default-years')?.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    const top2 = years.slice(0, 2);
+    $$('.proc-year-checkbox').forEach(cb => {
+      const shouldCheck = top2.includes(Number(cb.value));
+      cb.checked = shouldCheck;
+      cb.closest('.proc-dropdown-item')?.classList.toggle('active', shouldCheck);
+    });
+  });
+
+  $('#btn-cancel-year-dropdown')?.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    yearDropdownMenu.hidden = true;
+    yearDropdownBtn?.classList.remove('open');
+  });
+
+  $('#btn-apply-year-dropdown')?.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    const checkedYears = Array.from($$('.proc-year-checkbox:checked')).map(b => Number(b.value));
+    if (checkedYears.length === 0) {
+      toast('กรุณาเลือกอย่างน้อย 1 ปีงบประมาณ', 'warning');
+      return;
+    }
+    procState.selectedYears = checkedYears.sort((a, b) => b - a);
+    yearDropdownMenu.hidden = true;
+    yearDropdownBtn?.classList.remove('open');
+    procurementPage();
+  });
+
+  // Category Dropdown Toggle & Click Outside Handler
+  const catDropdownBtn = $('#btn-toggle-cat-dropdown');
+  const catDropdownMenu = $('#proc-cat-dropdown-menu');
+  const catDropdownWrapper = $('#proc-cat-dropdown-wrapper');
+
+  catDropdownBtn?.addEventListener('click', e => {
+    e.stopPropagation();
+    const isHidden = catDropdownMenu.hidden;
+    catDropdownMenu.hidden = !isHidden;
+    catDropdownBtn.classList.toggle('open', isHidden);
+    if (yearDropdownMenu) yearDropdownMenu.hidden = true;
+  });
+
+  // Keep dropdown open when clicking inside its body
+  catDropdownMenu?.addEventListener('click', e => {
+    e.stopPropagation();
+  });
+
+  document.addEventListener('click', e => {
+    if (yearDropdownWrapper && yearDropdownMenu && !yearDropdownWrapper.contains(e.target)) {
+      yearDropdownMenu.hidden = true;
+      yearDropdownBtn?.classList.remove('open');
+    }
+    if (catDropdownWrapper && catDropdownMenu && !catDropdownWrapper.contains(e.target)) {
+      catDropdownMenu.hidden = true;
+      catDropdownBtn?.classList.remove('open');
+    }
+  });
+
+  // Toggle visual active state on checkbox change without refreshing page
+  $$('.proc-cat-checkbox').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const parentLabel = cb.closest('.proc-dropdown-item');
+      if (parentLabel) parentLabel.classList.toggle('active', cb.checked);
+    });
+  });
+
+  // Select all inside dropdown
+  $('#btn-select-all-cats')?.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    $$('.proc-cat-checkbox').forEach(cb => {
+      cb.checked = true;
+      cb.closest('.proc-dropdown-item')?.classList.add('active');
+    });
+  });
+
+  // Clear all inside dropdown
+  $('#btn-clear-all-cats')?.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    $$('.proc-cat-checkbox').forEach(cb => {
+      cb.checked = false;
+      cb.closest('.proc-dropdown-item')?.classList.remove('active');
+    });
+  });
+
+  // Cancel dropdown
+  $('#btn-cancel-cat-dropdown')?.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    catDropdownMenu.hidden = true;
+    catDropdownBtn?.classList.remove('open');
+  });
+
+  // Apply selected categories and re-render
+  $('#btn-apply-cat-dropdown')?.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    const checkedBoxes = Array.from($$('.proc-cat-checkbox:checked')).map(b => b.value);
+    if (checkedBoxes.length === 0) {
+      procState.selectedCategoryIds = ['__none__'];
+    } else if (checkedBoxes.length === categories.length) {
+      procState.selectedCategoryIds = [];
+    } else {
+      procState.selectedCategoryIds = checkedBoxes;
+    }
+    procState.filterGroup = 'all';
+    catDropdownMenu.hidden = true;
+    catDropdownBtn?.classList.remove('open');
+    procurementPage();
+  });
+
+  $('#proc-filter-growth')?.addEventListener('change', e => {
+    procState.growthFilter = e.target.value;
+    procurementPage();
+  });
+
+  $('#proc-filter-sort')?.addEventListener('change', e => {
+    procState.sortBy = e.target.value;
+    procurementPage();
+  });
+
+  $$('[data-filter-group]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      procState.filterGroup = btn.dataset.filterGroup;
+      procState.selectedCategoryIds = [];
+      procurementPage();
+    });
+  });
+
+  $('#btn-reset-all-filters')?.addEventListener('click', () => {
+    procState.filterGroup = 'all';
+    procState.selectedCategoryIds = [];
+    procState.growthFilter = 'all';
+    procState.sortBy = 'default';
+    procurementPage();
+  });
+
+  // 2. Tab Navigation
+  if (procState.activeTab === 'tracking') procState.activeTab = 'comparison';
+  $$('[data-proc-tab]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      procState.activeTab = btn.dataset.procTab;
+      $$('.proc-tab-btn').forEach(b => b.classList.toggle('active', b === btn));
+      $('#proc-tab-content-comparison').hidden = procState.activeTab !== 'comparison';
+      $('#proc-tab-content-hospitals').hidden = procState.activeTab !== 'hospitals';
+      $('#proc-tab-content-master').hidden = procState.activeTab !== 'master';
+    });
+  });
+
+  // 2.2 Input Mode Switcher (Manual, Upload, Paste)
+  $$('[data-proc-mode]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      procState.inputMode = btn.dataset.procMode;
+      $$('.proc-mode-btn').forEach(b => b.classList.toggle('active', b === btn));
+      $('#proc-input-form').style.display = procState.inputMode === 'manual' ? '' : 'none';
+      $('#proc-upload-sec').style.display = procState.inputMode === 'upload' ? '' : 'none';
+      $('#proc-paste-sec').style.display = procState.inputMode === 'paste' ? '' : 'none';
+    });
+  });
+
+  // 2.3 File Upload & Dropzone Handlers
+  let stagedAttachment = null;
+  const fileInput = $('#proc-file-input');
+  const dropzone = $('#proc-dropzone');
+  const btnChoose = $('#btn-choose-file');
+
+  btnChoose?.addEventListener('click', () => fileInput?.click());
+  dropzone?.addEventListener('click', e => {
+    if (e.target !== btnChoose && !btnChoose?.contains(e.target)) fileInput?.click();
+  });
+  dropzone?.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
+  dropzone?.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+  dropzone?.addEventListener('drop', e => {
+    e.preventDefault();
+    dropzone.classList.remove('dragover');
+    if (e.dataTransfer.files?.length) handleProcFile(e.dataTransfer.files[0]);
+  });
+
+  fileInput?.addEventListener('change', e => {
+    if (e.target.files?.length) handleProcFile(e.target.files[0]);
+  });
+
+  function handleProcFile(file) {
+    if (file.size > 20 * 1024 * 1024) return toast('ขนาดไฟล์เกิน 20MB', 'error');
+    const reader = new FileReader();
+    reader.onload = () => {
+      stagedAttachment = {
+        name: file.name,
+        size: file.size,
+        type: file.type || 'application/octet-stream',
+        data: reader.result,
+        uploadedAt: new Date().toISOString()
+      };
+      
+      $('#proc-file-status-box').innerHTML = `
+        <div class="proc-attached-file-card">
+          <div class="proc-attached-file-info">
+            <span class="page-icon green" style="width:34px;height:34px;">${icon('file')}</span>
+            <div>
+              <strong>${esc(file.name)}</strong>
+              <small>${Math.round(file.size / 1024)} KB · พร้อมบันทึกแนบไฟล์</small>
+            </div>
+          </div>
+          <span class="pill normal">ไฟล์ใหม่</span>
+        </div>`;
+      $('#proc-upload-actions').style.display = 'block';
+      toast(`เลือกไฟล์ "${file.name}" เรียบร้อยแล้ว`);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  // Save Uploaded File Attachment
+  $('#btn-save-uploaded-file')?.addEventListener('click', async () => {
+    if (!stagedAttachment) return toast('กรุณาเลือกไฟล์ก่อนบันทึก', 'error');
+    try {
+      const payload = {
+        hospitalId: selectedHsp.id,
+        hospitalName: selectedHsp.name,
+        fiscalYear: procState.curYear,
+        categories: currentPlan.categories || {},
+        attachment: stagedAttachment,
+        tracking: currentPlan.tracking
+      };
+      const res = await api('/api/procurement/plans', { method: 'POST', body: JSON.stringify(payload) });
+      if (res.ok) {
+        toast(`แนบไฟล์ ${stagedAttachment.name} กับ ${selectedHsp.name} สำเร็จ`);
+        await procurementPage();
+      }
+    } catch (err) {
+      toast(err.message || 'บันทึกไฟล์แนบไม่สำเร็จ', 'error');
+    }
+  });
+
+  // Delete Attachment
+  $('#btn-delete-attachment')?.addEventListener('click', async () => {
+    const ok = await confirmModal({
+      title: 'ลบไฟล์แนบ?',
+      message: `ต้องการลบไฟล์แนบของ ${selectedHsp.name} ปีงบประมาณ ${procState.curYear} หรือไม่?`,
+      confirmText: 'ลบไฟล์',
+      danger: true
+    });
+    if (ok) {
+      try {
+        const payload = {
+          hospitalId: selectedHsp.id,
+          hospitalName: selectedHsp.name,
+          fiscalYear: procState.curYear,
+          categories: currentPlan.categories || {},
+          attachment: null,
+          tracking: currentPlan.tracking
+        };
+        await api('/api/procurement/plans', { method: 'POST', body: JSON.stringify(payload) });
+        toast('ลบไฟล์แนบเรียบร้อยแล้ว');
+        await procurementPage();
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    }
+  });
+
+  // 2.4 Quick Single Paste Handlers
+  const singlePasteText = $('#proc-single-paste-text');
+  const pastePreview = $('#proc-paste-preview');
+  
+  singlePasteText?.addEventListener('input', () => {
+    const raw = singlePasteText.value.trim();
+    if (!raw) {
+      pastePreview.innerHTML = '';
+      return;
+    }
+    const numbers = raw.split(/[\t, \n]+/).map(c => parseFloat(c.replace(/,/g, ''))).filter(n => !isNaN(n));
+    if (!numbers.length) {
+      pastePreview.innerHTML = '<span style="color:var(--red);">ไม่พบตัวเลขในข้อความที่วาง</span>';
+      return;
+    }
+    let totalVal = 0;
+    let totalItems = 0;
+    const itemsPreview = categories.map((c, i) => {
+      const count = numbers[i * 2] || 0;
+      const val = numbers[i * 2 + 1] || 0;
+      totalVal += val;
+      totalItems += count;
+      return `<span class="pill" style="font-size:9.5px;margin:2px;">${esc(c.shortName)}: ${val > 0 ? '฿' + fmtBaht(val) : '-'}</span>`;
+    }).join(' ');
+
+    pastePreview.innerHTML = `
+      <div style="background:#f0faf6;padding:10px;border-radius:8px;border:1px solid #cceee2;">
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-weight:700;color:var(--green-dark);">
+          <span>ตรวจพบ ${numbers.length} ค่าตัวเลข (${totalItems.toLocaleString()} รายการ)</span>
+          <span>รวม: ฿${fmtBaht(totalVal)}</span>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px;">${itemsPreview}</div>
+      </div>`;
+  });
+
+  $('#btn-apply-single-paste')?.addEventListener('click', async () => {
+    const raw = singlePasteText?.value.trim();
+    if (!raw) return toast('กรุณาวางข้อความก่อนกดบันทึก', 'error');
+    const numbers = raw.split(/[\t, \n]+/).map(c => parseFloat(c.replace(/,/g, ''))).filter(n => !isNaN(n));
+    if (!numbers.length) return toast('ไม่พบตัวเลขในข้อความที่วาง', 'error');
+
+    const catPayload = {};
+    categories.forEach((cat, i) => {
+      const count = numbers[i * 2] || 0;
+      const value = numbers[i * 2 + 1] || 0;
+      catPayload[cat.id] = { count, value };
+    });
+
+    try {
+      const payload = {
+        hospitalId: selectedHsp.id,
+        hospitalName: selectedHsp.name,
+        fiscalYear: procState.curYear,
+        categories: catPayload,
+        attachment: currentPlan.attachment,
+        tracking: currentPlan.tracking
+      };
+      const res = await api('/api/procurement/plans', { method: 'POST', body: JSON.stringify(payload) });
+      if (res.ok) {
+        toast(`บันทึกแผนจัดซื้อของ ${selectedHsp.name} จากข้อมูลที่วางเรียบร้อยแล้ว`);
+        await procurementPage();
+      }
+    } catch (err) {
+      toast(err.message || 'บันทึกข้อมูลไม่สำเร็จ', 'error');
+    }
+  });
+
+  // 3. Quick Edit from Hospital Ranking & Master Table
+  const bindHspButtons = () => {
+    $$('.proc-btn-select-hsp, .proc-link-hsp').forEach(btn => {
+      btn.addEventListener('click', () => {
+        procState.selectedHspId = btn.dataset.hspId;
+        procurementPage();
+        window.scrollTo({ top: 120, behavior: 'smooth' });
+      });
+    });
+  };
+  bindHspButtons();
+
+  // 4. Real-time Live Calculation on input keystroke with comma handling
+  const form = $('#proc-input-form');
+  const parseNum = val => parseFloat(String(val || '').replace(/,/g, '')) || 0;
+  const parseIntNum = val => parseInt(String(val || '').replace(/,/g, ''), 10) || 0;
+
+  // Auto format with comma on blur
+  $$('.proc-currency-input').forEach(input => {
+    input.addEventListener('blur', () => {
+      const raw = String(input.value || '').replace(/,/g, '').trim();
+      if (raw && !isNaN(Number(raw))) {
+        input.value = Number(raw).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      }
+    });
+  });
+
+  $$('.proc-number-input').forEach(input => {
+    input.addEventListener('blur', () => {
+      const raw = String(input.value || '').replace(/,/g, '').trim();
+      if (raw && !isNaN(Number(raw))) {
+        input.value = Math.round(Number(raw)).toLocaleString('th-TH');
+      }
+    });
+  });
+
+  const updateLiveSum = () => {
+    let sumVal = 0;
+    let sumItems = 0;
+    categories.forEach(cat => {
+      const vInput = form.querySelector(`input[name="val_${cat.id}"]`);
+      const cInput = form.querySelector(`input[name="count_${cat.id}"]`);
+      if (vInput) sumVal += parseNum(vInput.value);
+      if (cInput) sumItems += parseIntNum(cInput.value);
+    });
+    $('#proc-live-total-val').textContent = `฿${sumVal.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    $('#proc-live-total-items').textContent = sumItems.toLocaleString('th-TH');
+  };
+  form.addEventListener('input', updateLiveSum);
+
+  // 5. Save Form Submission
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const btn = $('#btn-save-proc-plan');
+    btn.disabled = true;
+    btn.innerHTML = `${icon('refresh')} กำลังบันทึก...`;
+
+    try {
+      const catPayload = {};
+      categories.forEach(cat => {
+        const vInput = form.querySelector(`input[name="val_${cat.id}"]`);
+        const cInput = form.querySelector(`input[name="count_${cat.id}"]`);
+        catPayload[cat.id] = {
+          count: parseIntNum(cInput?.value),
+          value: parseNum(vInput?.value)
+        };
+      });
+
+      const payload = {
+        hospitalId: selectedHsp.id,
+        hospitalName: selectedHsp.name,
+        fiscalYear: procState.curYear,
+        categories: catPayload,
+        tracking: currentPlan.tracking || {
+          planSubmission: 'ส่ง',
+          maintenancePlan: 'เรียบร้อย',
+          scorePeriod: 'oct_nov',
+          score: 3,
+          secPass: true,
+          fileDown: true,
+          returned: true
+        }
+      };
+
+      const res = await api('/api/procurement/plans', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+
+      if (res.ok) {
+        toast(`บันทึกแผนจัดซื้อปี ${procState.curYear} ของ ${selectedHsp.name} เรียบร้อยแล้ว`);
+        await procurementPage();
+      }
+    } catch (err) {
+      toast(err.message || 'บันทึกข้อมูลไม่สำเร็จ', 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = `${icon('save')} บันทึกข้อมูลแผนจัดซื้อ`;
+    }
+  });
+
+  // 6. Master Table Search Filter
+  const matrixSearch = $('#proc-matrix-search');
+  if (matrixSearch) {
+    matrixSearch.addEventListener('input', debounce(e => {
+      procState.searchQuery = e.target.value.trim();
+      procurementPage();
+    }, 250));
+  }
+
+  // 7. Reset Default Seed Data Dialog
+  $('#btn-reset-seed').addEventListener('click', async () => {
+    const ok = await confirmModal({
+      title: 'รีเซ็ตข้อมูลแผนจัดซื้อจากเอกสาร PDF?',
+      message: 'การดำเนินการนี้จะรีเซ็ตข้อมูลแผนจัดซื้อของทุกโรงพยาบาลกลับไปเป็นค่าเริ่มต้นตามตาราง PDF ปีงบประมาณ 2569 และ 2568',
+      confirmText: 'ยืนยันการรีเซ็ต',
+      danger: true
+    });
+
+    if (ok) {
+      try {
+        await api('/api/procurement/reset', { method: 'POST', body: '{}' });
+        toast('รีเซ็ตข้อมูลแผนจัดซื้อจาก PDF เรียบร้อยแล้ว');
+        await procurementPage();
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    }
+  });
+
+  // 8. Add Fiscal Year Modal Function
+  function openAddYearModal(defaultYear = (Math.max(...years, 2569) + 1)) {
+    const modalHtml = `
+      <div class="modal-backdrop" role="presentation">
+        <div class="modal" role="dialog" aria-modal="true" style="max-width:480px;width:95%;">
+          <div class="modal-head">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span class="page-icon blue" style="width:34px;height:34px;">${icon('plus')}</span>
+              <div>
+                <h2 style="font-size:16px;margin:0;">เพิ่มปีงบประมาณแผนจัดซื้อใหม่</h2>
+                <p style="font-size:11px;color:var(--muted);margin:2px 0 0;">สร้างชุดข้อมูลแผนจัดซื้อสำหรับปีงบประมาณใหม่ทั้งจังหวัดศรีสะเกษ</p>
+              </div>
+            </div>
+            <button class="icon-button subtle" data-close>${icon('close')}</button>
+          </div>
+          <div class="modal-body" style="padding:18px 20px;">
+            <label class="field compact" style="margin-bottom:12px;">
+              <span>ระบุปีงบประมาณ (พ.ศ.):</span>
+              <input type="number" id="input-new-fiscal-year" value="${defaultYear}" min="2500" max="2600" style="font-size:15px;font-weight:700;" placeholder="เช่น 2570">
+            </label>
+            <label class="field compact">
+              <span>คัดลอกข้อมูลเริ่มต้นจากปี:</span>
+              <select id="select-clone-fiscal-year" class="control" style="font-size:12px;">
+                ${years.map(y => `<option value="${y}">คัดลอกโครงร่างและข้อมูลจากปี ${y}</option>`).join('')}
+                <option value="">สร้างเป็นตารางว่างใหม่ (0 บาททุกรายการ)</option>
+              </select>
+            </label>
+            <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">
+              * เมื่อเพิ่มปีงบประมาณใหม่ ระบบจะสร้างตารางแผนจัดซื้อรองรับทั้ง 22 โรงพยาบาลของปีนั้นให้ทันที
+            </p>
+          </div>
+          <div class="modal-foot">
+            <button class="button secondary" type="button" data-close>ยกเลิก</button>
+            <button class="button primary" id="btn-submit-new-year" type="button">${icon('check')} สร้างปีงบประมาณใหม่</button>
+          </div>
+        </div>
+      </div>`;
+
+    openModal(modalHtml, modal => {
+      $('#btn-submit-new-year', modal).addEventListener('click', async () => {
+        const newYr = Number($('#input-new-fiscal-year', modal).value);
+        const cloneYr = $('#select-clone-fiscal-year', modal).value;
+        if (!newYr || newYr < 2500 || newYr > 2600) {
+          return toast('กรุณาระบุปีงบประมาณที่ถูกต้อง (พ.ศ. 2500 - 2600)', 'error');
+        }
+
+        try {
+          const res = await api('/api/procurement/years', {
+            method: 'POST',
+            body: JSON.stringify({ year: newYr, cloneFrom: cloneYr ? Number(cloneYr) : null })
+          });
+
+          if (res.ok) {
+            closeModal();
+            toast(`เพิ่มปีงบประมาณ ${newYr} สำหรับทั้งจังหวัดเรียบร้อยแล้ว`);
+            procState.curYear = newYr;
+            procState.prevYear = cloneYr ? Number(cloneYr) : (newYr - 1);
+            await procurementPage();
+          }
+        } catch (err) {
+          toast(err.message || 'เพิ่มปีงบประมาณไม่สำเร็จ', 'error');
+        }
+      });
+    });
+  }
+
+  $('#btn-add-proc-year')?.addEventListener('click', () => openAddYearModal());
+  $('#btn-add-year-left')?.addEventListener('click', () => openAddYearModal());
+
+  // 9. Excel Batch Paste Modal Dialog (ทั้งจังหวัด)
+  $('#btn-batch-paste').addEventListener('click', () => {
+    const batchHtml = `
+      <div class="modal-backdrop" role="presentation">
+        <div class="modal" role="dialog" aria-modal="true" style="max-width:780px;width:95%;">
+          <div class="modal-head">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span class="page-icon blue" style="width:34px;height:34px;">${icon('upload')}</span>
+              <div>
+                <h2 style="font-size:16px;margin:0;">วางข้อมูลแผนจัดซื้อทั้งจังหวัดจากตาราง Excel</h2>
+                <p style="font-size:11px;color:var(--muted);margin:2px 0 0;">นำเข้าข้อมูลแผนจัดซื้อยาและเวชภัณฑ์ทั้งจังหวัดศรีสะเกษ (22 โรงพยาบาล) พร้อมกันในคราวเดียว</p>
+              </div>
+            </div>
+            <button class="icon-button subtle" data-close>${icon('close')}</button>
+          </div>
+          <div class="modal-body proc-batch-modal-body" style="padding:18px 20px;">
+            <div style="font-size:11.5px;background:#f8fafc;padding:12px;border-radius:8px;border:1px solid #e2e8f0;margin-bottom:12px;">
+              <strong>คำแนะนำรูปแบบข้อมูลทั้งจังหวัด:</strong>
+              <p style="margin:4px 0 0;color:var(--muted);">
+                คัดลอกข้อมูลตารางทั้ง 22 โรงพยาบาลจาก Excel หรือเอกสาร โดยแต่ละแถวควรประกอบด้วย: <code>ชื่อโรงพยาบาล</code> หรือ <code>ลำดับ</code> ตามด้วยตัวเลขมูลค่าแต่ละหมวดหมู่คั่นด้วยการเว้นวรรคหรือแท็บ
+              </p>
+            </div>
+            <label class="field compact">
+              <span>วางข้อความตาราง Excel ทั้งจังหวัด:</span>
+              <textarea id="proc-batch-textarea" placeholder="1	ขุขันธ์	417	1782452.70	98	8274468	...&#10;2	โพธิ์ศรีสุวรรณ	0	0	..."></textarea>
+            </label>
+            <div style="display:flex;gap:10px;align-items:center;margin-top:10px;">
+              <label style="font-size:11.5px;font-weight:650;">เลือกปีงบประมาณที่ต้องการนำเข้า:</label>
+              <select id="proc-batch-year" class="control" style="width:90px;height:34px;font-size:11.5px;">
+                ${years.map(y => `<option value="${y}" ${y === procState.curYear ? 'selected' : ''}>${y}</option>`).join('')}
+              </select>
+              <button type="button" class="button secondary small" id="btn-batch-add-year" style="height:34px;padding:0 9px;font-size:11px;">
+                ${icon('plus')} เพิ่มปีใหม่
+              </button>
+            </div>
+          </div>
+          <div class="modal-foot">
+            <button class="button secondary" type="button" data-close>ยกเลิก</button>
+            <button class="button primary" id="btn-submit-batch" type="button">${icon('check')} ประมวลผลและนำเข้าข้อมูลทั้งจังหวัด</button>
+          </div>
+        </div>
+      </div>`;
+
+    openModal(batchHtml, modal => {
+      $('#btn-batch-add-year', modal)?.addEventListener('click', () => {
+        closeModal();
+        openAddYearModal();
+      });
+
+      $('#btn-submit-batch', modal).addEventListener('click', async () => {
+        const rawText = $('#proc-batch-textarea', modal).value.trim();
+        const batchYear = Number($('#proc-batch-year', modal).value) || procState.curYear;
+        if (!rawText) return toast('กรุณาวางข้อมูลก่อนกดนำเข้า', 'error');
+
+        const lines = rawText.split(/\r?\n/).filter(l => l.trim().length > 0);
+        const parsedPlans = [];
+
+        for (const line of lines) {
+          const cells = line.split(/\t|,/).map(c => c.trim().replace(/^"|"$/g, ''));
+          if (!cells.length) continue;
+
+          // Find hospital by matching name in first 2 columns
+          const possibleName = cells[0] || cells[1] || '';
+          const matchedHsp = hospitals.find(h => possibleName.includes(h.name.replace('โรงพยาบาล', '')) || (h.district && possibleName.includes(h.district)));
+          if (!matchedHsp) continue;
+
+          // Find numbers in remaining cells
+          const numbers = cells.filter(c => /^[\d,.-]+$/.test(c.replace(/,/g, ''))).map(c => parseFloat(c.replace(/,/g, '')) || 0);
+          const catPayload = {};
+          
+          // Map available numbers to categories pairs (count, val)
+          categories.forEach((cat, cIdx) => {
+            const count = numbers[cIdx * 2] || 0;
+            const value = numbers[cIdx * 2 + 1] || 0;
+            catPayload[cat.id] = { count, value };
+          });
+
+          parsedPlans.push({
+            hospitalId: matchedHsp.id,
+            hospitalName: matchedHsp.name,
+            categories: catPayload,
+            tracking: { planSubmission: 'ส่ง', maintenancePlan: 'เรียบร้อย', scorePeriod: 'oct_nov', score: 3, secPass: true, fileDown: true, returned: true }
+          });
+        }
+
+        if (!parsedPlans.length) return toast('ไม่สามารถจับคู่ชื่อโรงพยาบาลได้ กรุณาตรวจสอบข้อมูลที่วาง', 'error');
+
+        try {
+          const res = await api('/api/procurement/batch', {
+            method: 'POST',
+            body: JSON.stringify({ fiscalYear: batchYear, plans: parsedPlans })
+          });
+          if (res.ok) {
+            closeModal();
+            toast(`นำเข้าข้อมูลแผนจัดซื้อปี ${batchYear} สำเร็จ ${parsedPlans.length} โรงพยาบาล`);
+            await procurementPage();
+          }
+        } catch (err) {
+          toast(err.message || 'เกิดข้อผิดพลาดในการนำเข้า', 'error');
+        }
+      });
+    });
+  });
 }
 
 /* ══════════════════════════════════════════════════════════════

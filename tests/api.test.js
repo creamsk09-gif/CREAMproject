@@ -339,16 +339,23 @@ test('GET /api/facilities, POST /api/facilities, and DELETE /api/facilities/:nam
   assert.ok(Array.isArray(initialData.facilities));
   const initialCount = initialData.facilities.length;
 
-  // POST new facility
+  // POST new facility with address and phone
   const addRes = await fetch(`${base}/api/facilities`, {
     method: 'POST',
     headers: { cookie, 'X-CSRF-Token': csrf, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: 'บริษัท ทดสอบเวชภัณฑ์ จำกัด' })
+    body: JSON.stringify({
+      name: 'บริษัท ทดสอบเวชภัณฑ์ จำกัด',
+      address: '99/1 ถ.กสิกรรม ต.เมืองใต้ อ.เมือง จ.ศรีสะเกษ',
+      phone: '045-999999'
+    })
   });
   assert.equal(addRes.status, 201);
   const afterAddData = await addRes.json();
   assert.equal(afterAddData.facilities.length, initialCount + 1);
-  assert.ok(afterAddData.facilities.includes('บริษัท ทดสอบเวชภัณฑ์ จำกัด'));
+  const added = afterAddData.facilities.find(f => (f.name || f) === 'บริษัท ทดสอบเวชภัณฑ์ จำกัด');
+  assert.ok(added);
+  assert.equal(added.address, '99/1 ถ.กสิกรรม ต.เมืองใต้ อ.เมือง จ.ศรีสะเกษ');
+  assert.equal(added.phone, '045-999999');
 
   // DELETE facility
   const delRes = await fetch(`${base}/api/facilities/${encodeURIComponent('บริษัท ทดสอบเวชภัณฑ์ จำกัด')}`, {
@@ -358,7 +365,7 @@ test('GET /api/facilities, POST /api/facilities, and DELETE /api/facilities/:nam
   assert.equal(delRes.status, 200);
   const afterDelData = await delRes.json();
   assert.equal(afterDelData.facilities.length, initialCount);
-  assert.ok(!afterDelData.facilities.includes('บริษัท ทดสอบเวชภัณฑ์ จำกัด'));
+  assert.ok(!afterDelData.facilities.some(f => (f.name || f) === 'บริษัท ทดสอบเวชภัณฑ์ จำกัด'));
 });
 
 test('POST /api/transactions/:id/memo updates memo status', async () => {
@@ -391,3 +398,56 @@ test('POST /api/logout clears session', async () => {
   const check = await fetch(`${base}/api/session`, { headers: { cookie } });
   assert.equal(check.status, 401);
 });
+
+test('GET /api/notifications/expiry-preview and POST /api/notifications/expiry-alert send 6-month alert', async () => {
+  // Login again to get active session
+  const loginRes = await fetch(`${base}/api/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: 'admin', password: 'stock2569' })
+  });
+  assert.equal(loginRes.status, 200);
+  const newCookie = loginRes.headers.get('set-cookie').split(';')[0];
+  const loginData = await loginRes.json();
+  const newCsrf = loginData.csrf;
+
+  // 1. GET preview
+  const previewRes = await fetch(`${base}/api/notifications/expiry-preview?days=180`, {
+    headers: { cookie: newCookie }
+  });
+  assert.equal(previewRes.status, 200);
+  const previewData = await previewRes.json();
+  assert.equal(previewData.sender, 'cream.sk09@gmail.com');
+  assert.equal(previewData.recipient, 'lew0994733933@gmail.com');
+  assert.equal(previewData.thresholdDays, 180);
+  assert.ok(Array.isArray(previewData.items));
+  assert.ok(previewData.previewHtml.includes('cream.sk09@gmail.com'));
+  assert.ok(previewData.previewHtml.includes('lew0994733933@gmail.com'));
+
+  // 2. POST send alert
+  const sendRes = await fetch(`${base}/api/notifications/expiry-alert`, {
+    method: 'POST',
+    headers: { cookie: newCookie, 'X-CSRF-Token': newCsrf, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      sender: 'cream.sk09@gmail.com',
+      recipient: 'lew0994733933@gmail.com',
+      thresholdDays: 180
+    })
+  });
+  assert.equal(sendRes.status, 200);
+  const sendData = await sendRes.json();
+  assert.equal(sendData.ok, true);
+  assert.equal(sendData.result.sender, 'cream.sk09@gmail.com');
+  assert.equal(sendData.result.recipient, 'lew0994733933@gmail.com');
+  assert.ok(sendData.result.subject.includes('แจ้งเตือนด่วน'));
+
+  // 3. GET history
+  const historyRes = await fetch(`${base}/api/notifications/history`, {
+    headers: { cookie: newCookie }
+  });
+  assert.equal(historyRes.status, 200);
+  const historyData = await historyRes.json();
+  assert.ok(Array.isArray(historyData.emailLogs));
+  assert.ok(historyData.emailLogs.some(l => l.recipient === 'lew0994733933@gmail.com'));
+});
+

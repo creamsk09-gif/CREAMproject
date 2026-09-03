@@ -4,6 +4,7 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { suggestMappings, learnFromDecision } = require('./lib/mapping-engine');
+const emailService = require('./lib/email-service');
 const SEED_TEMPLATE = require('./data/seed.json');
 
 const ROOT = __dirname;
@@ -832,20 +833,28 @@ async function api(req, res, url) {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/facilities') {
-    return json(res, 200, { facilities: db.facilities || [] });
+    const list = (db.facilities || []).map(f => typeof f === 'string' ? { name: f, address: '', phone: '' } : f);
+    return json(res, 200, { facilities: list });
   }
 
   if (req.method === 'POST' && url.pathname === '/api/facilities') {
     if (s.user.role !== 'admin') return error(res, 403, 'FORBIDDEN', 'เฉพาะผู้ดูแลที่ได้รับมอบหมายเท่านั้น');
     const input = await body(req);
     const name = String(input.name || '').trim();
+    const address = String(input.address || '').trim();
+    const phone = String(input.phone || '').trim();
     if (!name || name.length < 2 || name.length > 120) return error(res, 422, 'VALIDATION_FAILED', 'กรอกชื่อหน่วยงาน/ผู้ส่งมอบความยาว 2-120 ตัวอักษร');
     if (!db.facilities) db.facilities = [];
-    if (db.facilities.some(f => f.toLowerCase() === name.toLowerCase())) {
-      return error(res, 409, 'DUPLICATE_NAME', 'มีชื่อหน่วยงาน/ผู้ส่งมอบนี้อยู่ในระบบแล้ว');
+    db.facilities = db.facilities.map(f => typeof f === 'string' ? { name: f, address: '', phone: '' } : f);
+    const existingIdx = db.facilities.findIndex(f => f.name.toLowerCase() === name.toLowerCase());
+    const facilityObj = { name, address, phone };
+    if (existingIdx !== -1) {
+      db.facilities[existingIdx] = facilityObj;
+      db.audit.push({ id: `aud-${crypto.randomUUID()}`, action: 'UPDATE_FACILITY', entity: 'facility', entityId: name, user: s.user.id, at: new Date().toISOString(), detail: `ปรับปรุงข้อมูลหน่วยงาน/ผู้ส่งมอบ: ${name}` });
+    } else {
+      db.facilities.push(facilityObj);
+      db.audit.push({ id: `aud-${crypto.randomUUID()}`, action: 'CREATE_FACILITY', entity: 'facility', entityId: name, user: s.user.id, at: new Date().toISOString(), detail: `เพิ่มหน่วยงาน/ผู้ส่งมอบ: ${name}` });
     }
-    db.facilities.push(name);
-    db.audit.push({ id: `aud-${crypto.randomUUID()}`, action: 'CREATE_FACILITY', entity: 'facility', entityId: name, user: s.user.id, at: new Date().toISOString(), detail: `เพิ่มหน่วยงาน/ผู้ส่งมอบ: ${name}` });
     await writeDb(db);
     return json(res, 201, { facilities: db.facilities, name });
   }
@@ -853,14 +862,83 @@ async function api(req, res, url) {
   const facilityDeleteMatch = url.pathname.match(/^\/api\/facilities\/([^/]+)$/);
   if (req.method === 'DELETE' && facilityDeleteMatch) {
     if (s.user.role !== 'admin') return error(res, 403, 'FORBIDDEN', 'เฉพาะผู้ดูแลที่ได้รับมอบหมายเท่านั้น');
-    const targetName = decodeURIComponent(facilityDeleteMatch[1]).trim();
+    const targetName = decodeURIComponent(facilityDeleteMatch[1]).trim().toLowerCase();
     if (!db.facilities) db.facilities = [];
-    const index = db.facilities.findIndex(f => f.toLowerCase() === targetName.toLowerCase());
+    db.facilities = db.facilities.map(f => typeof f === 'string' ? { name: f, address: '', phone: '' } : f);
+    const index = db.facilities.findIndex(f => f.name.toLowerCase() === targetName);
     if (index === -1) return error(res, 404, 'NOT_FOUND', 'ไม่พบชื่อหน่วยงาน/ผู้ส่งมอบนี้');
     const removed = db.facilities.splice(index, 1)[0];
-    db.audit.push({ id: `aud-${crypto.randomUUID()}`, action: 'DELETE_FACILITY', entity: 'facility', entityId: removed, user: s.user.id, at: new Date().toISOString(), detail: `ลบหน่วยงาน/ผู้ส่งมอบ: ${removed}` });
+    db.audit.push({ id: `aud-${crypto.randomUUID()}`, action: 'DELETE_FACILITY', entity: 'facility', entityId: removed.name, user: s.user.id, at: new Date().toISOString(), detail: `ลบหน่วยงาน/ผู้ส่งมอบ: ${removed.name}` });
     await writeDb(db);
     return json(res, 200, { facilities: db.facilities, ok: true });
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/notifications/expiry-preview') {
+    const thresholdDays = Math.max(1, Math.min(365, Number(url.searchParams.get('days')) || 180));
+    const recipient = String(url.searchParams.get('recipient') || emailService.DEFAULT_RECIPIENT).trim();
+    const sender = String(url.searchParams.get('sender') || emailService.DEFAULT_SENDER).trim();
+    const activeItems = (db.items || []).filter(i => i.active).map(enrich);
+    const expiringItems = activeItems.filter(i => Number(i.daysToExpiry) <= thresholdDays).sort((a, b) => a.daysToExpiry - b.daysToExpiry);
+    const previewHtml = emailService.generateExpiryAlertEmailHtml({ items: expiringItems, warehouse: db.meta.warehouse, thresholdDays, sender, recipient });
+    const previewText = emailService.generateExpiryAlertPlainText({ items: expiringItems, warehouse: db.meta.warehouse, thresholdDays, sender, recipient });
+    return json(res, 200, {
+      sender,
+      recipient,
+      thresholdDays,
+      itemCount: expiringItems.length,
+      items: expiringItems,
+      previewHtml,
+      previewText
+    });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/notifications/expiry-alert') {
+    const input = await body(req);
+    const thresholdDays = Math.max(1, Math.min(365, Number(input.thresholdDays) || 180));
+    const recipient = String(input.recipient || emailService.DEFAULT_RECIPIENT).trim();
+    const sender = String(input.sender || emailService.DEFAULT_SENDER).trim();
+    const activeItems = (db.items || []).filter(i => i.active).map(enrich);
+    const expiringItems = activeItems.filter(i => Number(i.daysToExpiry) <= thresholdDays).sort((a, b) => a.daysToExpiry - b.daysToExpiry);
+
+    const emailResult = await emailService.sendExpiryAlertEmail({
+      items: expiringItems,
+      warehouse: db.meta.warehouse,
+      sender,
+      recipient,
+      thresholdDays
+    });
+
+    if (!db.emailLogs) db.emailLogs = [];
+    const logEntry = {
+      id: `email-${crypto.randomUUID()}`,
+      sentAt: new Date().toISOString(),
+      sender,
+      recipient,
+      subject: emailResult.subject,
+      itemCount: expiringItems.length,
+      mode: emailResult.mode,
+      success: emailResult.success,
+      messageId: emailResult.messageId,
+      detail: emailResult.detail,
+      sentBy: s.user.id
+    };
+    db.emailLogs.push(logEntry);
+    db.audit.push({
+      id: `aud-${crypto.randomUUID()}`,
+      action: 'SEND_EXPIRY_EMAIL',
+      entity: 'notification',
+      entityId: logEntry.id,
+      user: s.user.id,
+      at: new Date().toISOString(),
+      detail: `ส่งแจ้งเตือนยาใกล้หมดอายุ ${expiringItems.length} รายการ จาก ${sender} ไปยัง ${recipient}`
+    });
+    await writeDb(db);
+
+    return json(res, 200, { ok: true, result: emailResult, log: logEntry, items: expiringItems });
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/notifications/history') {
+    return json(res, 200, { emailLogs: (db.emailLogs || []).slice(-30).reverse() });
   }
 
   if (req.method === 'GET' && url.pathname === '/api/master-data') return json(res, 200, { facilities: db.facilities, integrations: db.integrations, meta: db.meta, audit: db.audit.slice(-20).reverse() });

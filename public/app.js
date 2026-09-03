@@ -431,7 +431,10 @@ async function dashboard() {
       <section class="alert-banner">
         <div class="card-head">
           <div class="alert-title"><span>${icon('alert')}</span><div><h2>รายการที่ต้องจัดการ</h2><p>เรียงตามความเร่งด่วนจากวันหมดอายุและระดับคงคลัง</p></div></div>
-          <a class="text-link" href="#stock?status=expiring">ดูทั้งหมด ${icon('chevron')}</a>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <button type="button" class="button smart-primary small" id="btn-open-expiry-email">${icon('mail')} ส่งอีเมลแจ้งเตือน 6 เดือน</button>
+            <a class="text-link" href="#stock?status=expiring">ดูทั้งหมด ${icon('chevron')}</a>
+          </div>
         </div>
         <div class="alert-list">${d.alerts.slice(0, 3).map(alertCard).join('')}</div>
       </section>` : ''}
@@ -453,6 +456,10 @@ async function dashboard() {
         <div class="timeline">${d.recent.map(timelineRow).join('') || '<div class="empty-inline">ยังไม่มีกิจกรรม</div>'}</div>
       </section>
     </div>`;
+
+  $('#btn-open-expiry-email')?.addEventListener('click', () => {
+    openExpiryAlertEmailModal();
+  });
 
   // Start auto-refresh polling every 60s
   startPolling(dashboard, 60000);
@@ -1054,7 +1061,7 @@ async function transactionPage(type) {
   });
 }
 
-async function openFacilitiesModal(type) {
+async function openFacilitiesModal(type, onChanged) {
   try {
     const d = await api('/api/facilities');
     state.facilities = d.facilities;
@@ -1064,30 +1071,53 @@ async function openFacilitiesModal(type) {
 
   function renderList() {
     return state.facilities.length
-      ? state.facilities.map(f => `
-        <div class="master-manage-item">
-          <strong>${esc(f)}</strong>
-          <button type="button" class="icon-button danger btn-del-facility" data-name="${esc(f)}" aria-label="ลบ">${icon('trash')}</button>
-        </div>`).join('')
+      ? state.facilities.map(f => {
+          const fname = typeof f === 'string' ? f : (f.name || '');
+          const faddr = typeof f === 'object' ? (f.address || '') : '';
+          const fphone = typeof f === 'object' ? (f.phone || '') : '';
+          return `
+            <div class="fac-item-card">
+              <div class="fac-item-info">
+                <strong>${esc(fname)}</strong>
+                ${(faddr || fphone) ? `<div class="fac-meta-line">${faddr ? `📍 ${esc(faddr)} ` : ''}${fphone ? `📞 โทร. ${esc(fphone)}` : ''}</div>` : '<div class="fac-meta-line" style="color:var(--muted); font-style:italic;">ยังไม่ได้ระบุที่อยู่/เบอร์โทร</div>'}
+              </div>
+              <button type="button" class="icon-button danger btn-del-facility" data-name="${esc(fname)}" aria-label="ลบ">${icon('trash')}</button>
+            </div>`;
+        }).join('')
       : '<div class="empty-inline">ยังไม่มีรายชื่อหน่วยงาน</div>';
   }
 
   const html = `
     <div class="modal-backdrop" role="presentation">
-      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal" style="width:min(680px, 96vw);" role="dialog" aria-modal="true" aria-labelledby="modal-title">
         <div class="modal-head">
           <h2 id="modal-title">${icon('gear')} จัดการรายชื่อผู้ส่งมอบ / หน่วยงาน</h2>
           <button class="icon-button" type="button" data-close aria-label="ปิด">${icon('close')}</button>
         </div>
         <div class="modal-body">
-          <p style="font-size:13px;color:var(--muted);margin-bottom:12px;">รายชื่อหน่วยงานและผู้ส่งมอบสำหรับเลือกในเอกสารรับเข้าและเบิกจ่าย</p>
-          <form id="add-facility-form" class="master-manage-add">
-            <input class="control" id="new-facility-name" required placeholder="พิมพ์ชื่อผู้ส่งมอบ / หน่วยงานใหม่..." minlength="2" maxlength="120">
-            <button class="button primary" type="submit">${icon('plus')} เพิ่ม</button>
+          <p style="font-size:13px;color:var(--muted);margin-bottom:12px;">กำหนดรายชื่อหน่วยงาน พร้อมที่อยู่และหมายเลขโทรศัพท์ เพื่อดึงมาใช้ในใบรับของโดยอัตโนมัติ</p>
+          <form id="add-facility-form" class="fac-form-grid">
+            <div>
+              <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">ชื่อผู้ส่งมอบ / หน่วยงาน <b class="required">*</b></label>
+              <input class="control" id="new-facility-name" required placeholder="พิมพ์ชื่อผู้ส่งมอบ / หน่วยงานใหม่..." minlength="2" maxlength="120">
+            </div>
+            <div class="fac-form-row">
+              <div>
+                <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">ที่อยู่ที่สามารถติดต่อได้</label>
+                <input class="control" id="new-facility-address" placeholder="เช่น 123 ถ.กสิกรรม ต.เมืองใต้ อ.เมือง จ.ศรีสะเกษ">
+              </div>
+              <div>
+                <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">หมายเลขโทรศัพท์</label>
+                <input class="control" id="new-facility-phone" placeholder="เช่น 045-123456, 081-2345678">
+              </div>
+            </div>
+            <div style="text-align:right;">
+              <button class="button primary" type="submit">${icon('plus')} เพิ่ม / บันทึกข้อมูลหน่วยงาน</button>
+            </div>
           </form>
           <div id="facility-manage-error" class="form-error modal-error" style="margin-top:6px;"></div>
-          <h3 style="font-size:14px;margin-top:16px;margin-bottom:6px;">รายชื่อปัจจุบัน (<span id="fac-count">${state.facilities.length}</span>)</h3>
-          <div id="facilities-manage-list" class="master-manage-list">
+          <h3 style="font-size:14px;margin-top:16px;margin-bottom:8px;">รายชื่อปัจจุบัน (<span id="fac-count">${state.facilities.length}</span>)</h3>
+          <div id="facilities-manage-list" class="master-manage-list" style="max-height:260px;overflow-y:auto;">
             ${renderList()}
           </div>
         </div>
@@ -1116,6 +1146,7 @@ async function openFacilitiesModal(type) {
               $('#facilities-manage-list', modal).innerHTML = renderList();
               $('#fac-count', modal).textContent = state.facilities.length;
               updateTransactionFacilitiesDatalist();
+              if (onChanged) onChanged(state.facilities);
               toast(`ลบ "${fname}" เรียบร้อย`);
               bindEvents();
             } catch (ex) {
@@ -1128,17 +1159,27 @@ async function openFacilitiesModal(type) {
 
     $('#add-facility-form', modal).addEventListener('submit', async e => {
       e.preventDefault();
-      const input = $('#new-facility-name', modal);
-      const name = input.value.trim();
+      const nameInput = $('#new-facility-name', modal);
+      const addrInput = $('#new-facility-address', modal);
+      const phoneInput = $('#new-facility-phone', modal);
+      const name = nameInput.value.trim();
+      const address = addrInput.value.trim();
+      const phone = phoneInput.value.trim();
       if (!name) return;
       try {
-        const res = await api('/api/facilities', { method: 'POST', body: JSON.stringify({ name }) });
+        const res = await api('/api/facilities', {
+          method: 'POST',
+          body: JSON.stringify({ name, address, phone })
+        });
         state.facilities = res.facilities;
-        input.value = '';
+        nameInput.value = '';
+        addrInput.value = '';
+        phoneInput.value = '';
         $('#facilities-manage-list', modal).innerHTML = renderList();
         $('#fac-count', modal).textContent = state.facilities.length;
         updateTransactionFacilitiesDatalist(name);
-        toast(`เพิ่ม "${name}" เรียบร้อย`);
+        if (onChanged) onChanged(state.facilities);
+        toast(`บันทึกข้อมูล "${name}" เรียบร้อย`);
         bindEvents();
       } catch (ex) {
         $('#facility-manage-error', modal).textContent = ex.message;
@@ -1152,7 +1193,10 @@ async function openFacilitiesModal(type) {
 function updateTransactionFacilitiesDatalist(selectedName = '') {
   const datalist = $('#facilities-list');
   if (datalist) {
-    datalist.innerHTML = state.facilities.map(x => `<option value="${esc(x)}">`).join('');
+    datalist.innerHTML = state.facilities.map(x => {
+      const name = typeof x === 'string' ? x : (x.name || '');
+      return `<option value="${esc(name)}">`;
+    }).join('');
   }
   const input = $('#tx-facility');
   if (input && selectedName) {
@@ -1716,124 +1760,463 @@ function printThankYouDocument(t) {
   prepareOfficialPrintWindow(printWindow);
 }
 
-function printGoodsReceiptDocument(t) {
+function getSignatories() {
+  try {
+    const raw = localStorage.getItem('ssk_personnel_list');
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  return [
+    { id: '1', name: 'นายแพทย์ทนง วีระแสงพงษ์', position: 'นายแพทย์สาธารณสุขจังหวัดศรีสะเกษ' },
+    { id: '2', name: 'ภก.เด่นชัย ปัญญาดี', position: 'หัวหน้ากลุ่มงานเภสัชกรรมและคุ้มครองผู้บริโภค' },
+    { id: '3', name: 'ภญ.วิภาวดี มีสุข', position: 'เภสัชกรชำนาญการ' },
+    { id: '4', name: 'นายสมศักดิ์ คลังดี', position: 'เจ้าพนักงานพัสดุชำนาญงาน' },
+    { id: '5', name: 'นางสาวสุดารัตน์ ใจงาม', position: 'เจ้าหน้าที่คลังเวชภัณฑ์' }
+  ];
+}
+
+function saveSignatories(list) {
+  try {
+    localStorage.setItem('ssk_personnel_list', JSON.stringify(list));
+  } catch (e) {}
+}
+
+function openManageSignatoriesModal(onChanged) {
+  let list = getSignatories();
+  function renderList() {
+    const container = $('#personnel-items-container');
+    if (!container) return;
+    container.innerHTML = list.map((p, idx) => `
+      <div class="personnel-item">
+        <div>
+          <strong>${esc(p.name)}</strong>
+          <small>${esc(p.position || 'ไม่ระบุตำแหน่ง')}</small>
+        </div>
+        <button type="button" class="icon-button danger btn-del-person" data-index="${idx}" title="ลบรายชื่อ" aria-label="ลบรายชื่อ">${icon('close')}</button>
+      </div>
+    `).join('') || '<div class="empty-inline" style="padding:15px;">ยังไม่มีรายชื่อบุคลากร</div>';
+
+    $$('.btn-del-person', container).forEach(b => {
+      b.addEventListener('click', () => {
+        list.splice(Number(b.dataset.index), 1);
+        saveSignatories(list);
+        renderList();
+        if (typeof onChanged === 'function') onChanged(list);
+      });
+    });
+  }
+
+  const html = `
+    <div class="modal-backdrop" role="presentation">
+      <div class="modal" style="width:min(540px, 96vw);" role="dialog" aria-modal="true" aria-labelledby="manage-sign-title">
+        <div class="modal-head">
+          <h2 id="manage-sign-title">${icon('gear')} จัดการรายชื่อผู้ลงนาม / บุคลากร</h2>
+          <button class="icon-button" type="button" data-close aria-label="ปิด">${icon('close')}</button>
+        </div>
+        <div class="modal-body">
+          <p style="font-size:12px;color:var(--muted);margin-bottom:14px;">เพิ่มหรือลบรายชื่อบุคลากรเพื่อใช้เลือกเป็นผู้ลงนามในเอกสารราชการต่างๆ</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;margin-bottom:14px;">
+            <label class="field compact" style="margin:0;">
+              <span>ชื่อ-นามสกุล <b class="required">*</b></span>
+              <input class="control" id="new-person-name" placeholder="เช่น ภก.สมชาย ใจดี">
+            </label>
+            <label class="field compact" style="margin:0;">
+              <span>ตำแหน่ง <b class="required">*</b></span>
+              <input class="control" id="new-person-pos" placeholder="เช่น เภสัชกรชำนาญการ">
+            </label>
+            <button type="button" class="button primary small" id="btn-add-person" style="height:42px;">${icon('plus')} เพิ่ม</button>
+          </div>
+          <div class="personnel-list" id="personnel-items-container"></div>
+        </div>
+        <div class="modal-foot">
+          <button class="button primary small" type="button" data-close>เสร็จสิ้น</button>
+        </div>
+      </div>
+    </div>`;
+
+  openModal(html, modal => {
+    renderList();
+    const nameInp = $('#new-person-name', modal);
+    const posInp = $('#new-person-pos', modal);
+    $('#btn-add-person', modal)?.addEventListener('click', () => {
+      const name = nameInp.value.trim();
+      const pos = posInp.value.trim();
+      if (!name) return toast('กรุณาระบุชื่อ-นามสกุล', 'error');
+      list.push({ id: 'p-' + Date.now(), name, position: pos });
+      saveSignatories(list);
+      nameInp.value = '';
+      posInp.value = '';
+      renderList();
+      if (typeof onChanged === 'function') onChanged(list);
+      toast(`เพิ่มรายชื่อ "${name}" เรียบร้อย`);
+    });
+  });
+}
+
+async function openGoodsReceiptPromptModal(t) {
+  if (!state.facilities?.length) {
+    try {
+      const d = await api('/api/facilities');
+      state.facilities = d.facilities;
+    } catch (e) {}
+  }
+  let personnel = getSignatories();
   const isInbound = t.type === 'inbound';
-  const docTitle = isInbound ? 'ใบตรวจรับยาและเวชภัณฑ์ (ใบรับของ)' : 'ใบส่งมอบยาและเวชภัณฑ์ (ใบจ่ายของ)';
+  const docTitle = isInbound ? 'พิมพ์ใบรับของ' : 'พิมพ์ใบจ่ายของ / ใบเบิกจ่าย';
+
+  function getFacInfo() {
+    const facObj = (state.facilities || []).find(f => {
+      const name = typeof f === 'string' ? f : (f.name || '');
+      return name.toLowerCase() === (t.facility || '').toLowerCase();
+    });
+    return {
+      name: (typeof facObj === 'string' ? facObj : facObj?.name) || t.facility || '',
+      address: (typeof facObj === 'object' ? facObj?.address : '') || '',
+      phone: (typeof facObj === 'object' ? facObj?.phone : '') || ''
+    };
+  }
+
+  let facInfo = getFacInfo();
+
+  function renderDatalist() {
+    return `<datalist id="signatories-name-list">
+      ${personnel.map(p => `<option value="${esc(p.name)}">`).join('')}
+    </datalist>`;
+  }
+
+  const html = `
+    <div class="modal-backdrop" role="presentation">
+      <div class="modal" style="width:min(740px, 96vw);" role="dialog" aria-modal="true" aria-labelledby="receipt-prompt-title">
+        <div class="modal-head">
+          <div>
+            <h2 id="receipt-prompt-title">${icon('file')} ${docTitle}</h2>
+            <p style="font-size:12px;color:var(--muted);margin-top:2px;">เอกสาร ${esc(t.refNo)} · ดึงข้อมูลที่อยู่และเบอร์โทรจากฐานข้อมูลหน่วยงานอัตโนมัติ</p>
+          </div>
+          <button class="icon-button" type="button" data-close aria-label="ปิด">${icon('close')}</button>
+        </div>
+        <form id="receipt-prompt-form">
+          <div class="modal-body">
+            <div class="section-title" style="margin-bottom:8px;">
+              <span>${icon('file')}</span>
+              <h2>ข้อมูล${isInbound ? 'ผู้สนับสนุน / บริจาค (ผู้ส่งมอบ / แหล่งที่มา)' : 'หน่วยงานผู้เบิก'}</h2>
+            </div>
+            
+            <div class="facility-summary-card">
+              <div class="fac-summary-name">
+                <span>🏢 <strong id="prompt-fac-name">${esc(facInfo.name)}</strong></span>
+                <button type="button" class="manage-btn-pill" id="btn-manage-fac-prompt">${icon('gear')} จัดการข้อมูลหน่วยงาน</button>
+              </div>
+              <div class="fac-summary-detail">
+                <div><strong>ที่อยู่:</strong> <span id="prompt-fac-address">${esc(facInfo.address || '— (ยังไม่ได้ระบุที่อยู่)')}</span></div>
+                <div><strong>หมายเลขโทรศัพท์:</strong> <span id="prompt-fac-phone">${esc(facInfo.phone || '— (ยังไม่ได้ระบุเบอร์โทร)')}</span></div>
+              </div>
+            </div>
+            <input type="hidden" name="donorName" id="hidden-donor-name" value="${esc(facInfo.name)}">
+            <input type="hidden" name="donorAddress" id="hidden-donor-address" value="${esc(facInfo.address)}">
+            <input type="hidden" name="donorPhone" id="hidden-donor-phone" value="${esc(facInfo.phone)}">
+
+            <div class="signatories-box">
+              <div class="signatories-head">
+                <h3>${icon('award')} ข้อมูลผู้ลงนาม 4 ฝ่าย</h3>
+                <button type="button" class="manage-btn-pill" id="btn-manage-sign-prompt">${icon('gear')} จัดการรายชื่อ</button>
+              </div>
+              <div id="datalist-container">${renderDatalist()}</div>
+              
+              <div class="signatories-grid">
+                <div class="sign-role-card">
+                  <span class="role-title">1. ผู้ตรวจสอบก่อนส่งมอบ</span>
+                  <label class="field compact" style="margin:0;">
+                    <span>ชื่อ-นามสกุล</span>
+                    <input class="control sign-name-input" name="checkerSendName" list="signatories-name-list" placeholder="พิมพ์หรือเลือกชื่อ...">
+                  </label>
+                  <label class="field compact" style="margin:0;">
+                    <span>ตำแหน่ง</span>
+                    <input class="control sign-pos-input" name="checkerSendPos" placeholder="ระบุตำแหน่ง...">
+                  </label>
+                </div>
+
+                <div class="sign-role-card">
+                  <span class="role-title">2. ผู้ตรวจสอบก่อนรับ</span>
+                  <label class="field compact" style="margin:0;">
+                    <span>ชื่อ-นามสกุล</span>
+                    <input class="control sign-name-input" name="checkerRecvName" list="signatories-name-list" placeholder="พิมพ์หรือเลือกชื่อ...">
+                  </label>
+                  <label class="field compact" style="margin:0;">
+                    <span>ตำแหน่ง</span>
+                    <input class="control sign-pos-input" name="checkerRecvPos" placeholder="ระบุตำแหน่ง...">
+                  </label>
+                </div>
+
+                <div class="sign-role-card">
+                  <span class="role-title">3. ผู้ส่งมอบ</span>
+                  <label class="field compact" style="margin:0;">
+                    <span>ชื่อ-นามสกุล</span>
+                    <input class="control sign-name-input" name="senderName" list="signatories-name-list" placeholder="พิมพ์หรือเลือกชื่อ...">
+                  </label>
+                  <label class="field compact" style="margin:0;">
+                    <span>ตำแหน่ง</span>
+                    <input class="control sign-pos-input" name="senderPos" placeholder="ระบุตำแหน่ง...">
+                  </label>
+                </div>
+
+                <div class="sign-role-card">
+                  <span class="role-title">4. ผู้รับ</span>
+                  <label class="field compact" style="margin:0;">
+                    <span>ชื่อ-นามสกุล</span>
+                    <input class="control sign-name-input" name="receiverName" list="signatories-name-list" placeholder="พิมพ์หรือเลือกชื่อ...">
+                  </label>
+                  <label class="field compact" style="margin:0;">
+                    <span>ตำแหน่ง</span>
+                    <input class="control sign-pos-input" name="receiverPos" placeholder="ระบุตำแหน่ง...">
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-foot" style="display:flex;justify-content:space-between;align-items:center;">
+            <button class="button secondary small" type="button" data-close>ยกเลิก</button>
+            <button class="button receipt-btn" type="submit">${icon('print')} ยืนยันและพิมพ์${isInbound ? 'ใบรับของ' : 'ใบจ่ายของ'}</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+
+  openModal(html, modal => {
+    function setupNamePosAutofill() {
+      $$('.sign-name-input', modal).forEach(nameInp => {
+        nameInp.addEventListener('input', () => {
+          const matched = personnel.find(p => p.name === nameInp.value.trim());
+          if (matched) {
+            const card = nameInp.closest('.sign-role-card');
+            const posInp = card?.querySelector('.sign-pos-input');
+            if (posInp) posInp.value = matched.position || '';
+          }
+        });
+      });
+    }
+
+    setupNamePosAutofill();
+
+    $('#btn-manage-fac-prompt', modal)?.addEventListener('click', () => {
+      openFacilitiesModal(null, () => {
+        facInfo = getFacInfo();
+        const nameEl = $('#prompt-fac-name', modal);
+        const addrEl = $('#prompt-fac-address', modal);
+        const phoneEl = $('#prompt-fac-phone', modal);
+        const hidName = $('#hidden-donor-name', modal);
+        const hidAddr = $('#hidden-donor-address', modal);
+        const hidPhone = $('#hidden-donor-phone', modal);
+        if (nameEl) nameEl.textContent = facInfo.name;
+        if (addrEl) addrEl.textContent = facInfo.address || '— (ยังไม่ได้ระบุที่อยู่)';
+        if (phoneEl) phoneEl.textContent = facInfo.phone || '— (ยังไม่ได้ระบุเบอร์โทร)';
+        if (hidName) hidName.value = facInfo.name;
+        if (hidAddr) hidAddr.value = facInfo.address;
+        if (hidPhone) hidPhone.value = facInfo.phone;
+      });
+    });
+
+    $('#btn-manage-sign-prompt', modal)?.addEventListener('click', () => {
+      openManageSignatoriesModal(updatedList => {
+        personnel = updatedList;
+        const dlContainer = $('#datalist-container', modal);
+        if (dlContainer) dlContainer.innerHTML = renderDatalist();
+        setupNamePosAutofill();
+      });
+    });
+
+    $('#receipt-prompt-form', modal)?.addEventListener('submit', e => {
+      e.preventDefault();
+      const fd = new FormData(e.currentTarget);
+      const meta = {
+        donorName: fd.get('donorName'),
+        donorAddress: fd.get('donorAddress'),
+        donorPhone: fd.get('donorPhone'),
+        checkerSendName: fd.get('checkerSendName'),
+        checkerSendPos: fd.get('checkerSendPos'),
+        checkerRecvName: fd.get('checkerRecvName'),
+        checkerRecvPos: fd.get('checkerRecvPos'),
+        senderName: fd.get('senderName'),
+        senderPos: fd.get('senderPos'),
+        receiverName: fd.get('receiverName'),
+        receiverPos: fd.get('receiverPos')
+      };
+      closeModal();
+      printGoodsReceiptDocument(t, meta);
+    });
+  });
+}
+
+function toThaiNum(val) {
+  if (val === null || val === undefined) return '';
+  const thDigits = ['๐', '๑', '๒', '๓', '๔', '๕', '๖', '๗', '๘', '๙'];
+  return String(val).replace(/[0-9]/g, d => thDigits[d]);
+}
+
+function printGoodsReceiptDocument(t, meta = {}) {
+  const isInbound = t.type === 'inbound';
+  const docTitle = isInbound ? 'ใบรับของ' : 'ใบส่งมอบ / ใบจ่ายของ';
   const printWindow = window.open('', '_blank');
   if (!printWindow) {
     alert('กรุณาอนุญาตป๊อปอัป (Popup) เพื่อพิมพ์เอกสาร');
     return;
   }
 
-  const totalQty = t.items.reduce((sum, line) => sum + Number(line.qty || 0), 0);
-  const itemsRows = t.items.map((line, idx) => `
-    <tr>
-      <td style="text-align:center;">${idx + 1}</td>
-      <td>
-        <strong>${esc(line.item?.name || line.itemId)}</strong>
-        ${line.item?.code ? `<br><small style="color:#555;">รหัส: ${esc(line.item.code)}</small>` : ''}
-      </td>
-      <td style="text-align:center;">${esc(line.lot || '-')}</td>
-      <td style="text-align:center;">${fdate(line.expiry)}</td>
-      <td style="text-align:right;"><strong>${fmt.format(line.qty)}</strong></td>
-      <td style="text-align:center;">${esc(line.item?.unit || 'หน่วย')}</td>
-    </tr>
-  `).join('');
+  const d = new Date(t.date || today());
+  const thMonths = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+  const day = d.getDate();
+  const month = thMonths[d.getMonth()];
+  const year = d.getFullYear() + 543;
+
+  const minRows = Math.max(7, t.items.length);
+  let rowsHtml = '';
+  for (let i = 0; i < minRows; i++) {
+    const line = t.items[i];
+    if (line) {
+      rowsHtml += `
+        <tr>
+          <td style="text-align: center; height: 9mm;">${toThaiNum(i + 1)}</td>
+          <td style="padding: 1.5mm 3mm; text-align: left;">${toThaiNum(esc(line.item?.name || line.itemId))}</td>
+          <td style="text-align: center;">${toThaiNum(esc(line.item?.unit || 'หน่วย'))}</td>
+          <td style="text-align: center;">${toThaiNum(fmt.format(line.qty))}</td>
+        </tr>`;
+    } else {
+      rowsHtml += `
+        <tr>
+          <td style="text-align: center; height: 9mm;">${toThaiNum(i + 1)}</td>
+          <td></td>
+          <td></td>
+          <td></td>
+        </tr>`;
+    }
+  }
 
   const html = `
 <!DOCTYPE html>
 <html lang="th">
 <head>
   <meta charset="UTF-8">
-  <title>${esc(docTitle)} - ${esc(t.refNo)}</title>
+  <title>${esc(docTitle)} - ${toThaiNum(esc(t.refNo))}</title>
   <style>
     ${officialDocumentFontCss()}
-    @page { size: A4 portrait; margin: 20mm 20mm 20mm 20mm; }
+    @page {
+      size: A4 portrait;
+      margin: 16mm 18mm 16mm 18mm;
+    }
     * { box-sizing: border-box; }
     html { background: #e5e7eb; }
     body {
-      font-family: 'TH Sarabun New', sans-serif;
+      font-family: 'TH Sarabun New', Sarabun, sans-serif;
       font-size: 16pt;
       line-height: 1.25;
       color: #000;
       background: #fff;
       margin: 0;
-      min-height: 257mm;
+      min-height: 265mm;
     }
-    .doc-header {
+    .doc-main-title {
       text-align: center;
-      margin-bottom: 5mm;
-      border-bottom: 2pt double #000;
-      padding-bottom: 3mm;
-    }
-    .doc-header h1 {
-      margin: 0 0 2mm 0;
-      font-size: 20pt;
+      font-size: 22pt;
       font-weight: bold;
+      margin: 0 0 3mm 0;
     }
-    .doc-header p {
-      margin: 0;
+    .doc-gov-head {
+      text-align: right;
       font-size: 16pt;
-      color: #333;
+      line-height: 1.35;
+      margin-bottom: 4mm;
     }
-    .meta-table {
+    .donor-info-block {
+      font-size: 16pt;
+      line-height: 1.45;
+      margin-bottom: 4mm;
+    }
+    .donor-info-row {
+      margin-bottom: 1.5mm;
+      word-break: break-word;
+    }
+    .donor-label {
+      display: inline-block;
+      min-width: 175px;
+    }
+    .data-table {
       width: 100%;
       border-collapse: collapse;
-      margin: 4mm 0 6mm 0;
+      margin: 3mm 0 2mm 0;
       font-size: 16pt;
     }
-    .meta-table td {
-      padding: 1.5mm 2mm;
-      vertical-align: top;
-    }
-    .meta-label {
-      font-weight: bold;
-      width: 140px;
-    }
-    table.data-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 4mm 0;
-      font-size: 16pt;
-    }
-    table.data-table th, table.data-table td {
+    .data-table th, .data-table td {
       border: 1pt solid #000;
-      padding: 1.5mm 2.5mm;
       line-height: 1.15;
     }
-    table.data-table th {
-      background: #f1f5f9;
+    .data-table th {
+      background: #fff;
       text-align: center;
       font-weight: bold;
+      padding: 2mm 1mm;
     }
-    table.data-table tfoot td {
-      font-weight: bold;
-      background: #fafafa;
+    .data-table thead { display: table-header-group; }
+    .data-table tr { page-break-inside: avoid; }
+    .summary-wrap {
+      display: flex;
+      justify-content: flex-end;
+      margin: 3mm 0 4mm 0;
     }
-    table.data-table thead { display: table-header-group; }
-    table.data-table tr { page-break-inside: avoid; }
-    .cert-text {
-      margin: 6mm 0 8mm 0;
-      text-indent: 1.5cm;
-      text-align: justify;
+    .summary-text-block {
+      text-align: left;
       font-size: 16pt;
+      line-height: 1.45;
+      display: inline-block;
     }
-    .sign-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 5mm;
-      margin-top: 8mm;
-      text-align: center;
+    .sign-table {
+      width: 100%;
+      border-collapse: collapse;
+      border: none !important;
+      margin-top: 3mm;
       page-break-inside: avoid;
     }
-    .sign-card {
-      padding: 2mm;
+    .sign-table td {
+      border: none !important;
+      padding: 1mm 1mm;
+      vertical-align: top;
+      width: 50%;
+      font-size: 15pt;
+      line-height: 1.3;
     }
-    .sign-line {
-      margin: 12mm 0 2mm 0;
-      display: inline-block;
-      width: 80%;
+    .sign-line-box {
+      display: flex;
+      align-items: baseline;
+      white-space: nowrap;
+    }
+    .sign-prefix {
+      width: 9.5mm;
+      flex-shrink: 0;
+    }
+    .sign-dots {
+      width: 42mm;
       border-bottom: 1pt dotted #000;
+      margin: 0 3px;
+      flex-shrink: 0;
+      display: inline-block;
+      height: 12pt;
+    }
+    .sign-role-label {
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .sign-name-wrap {
+      width: 42mm;
+      margin-left: calc(9.5mm + 3px);
+      display: flex;
+      justify-content: center;
+      margin-top: 1.2mm;
+    }
+    .sign-name-sub {
+      white-space: nowrap;
+      text-align: center;
+    }
+    .sign-pos-sub {
+      margin-left: 0;
+      margin-top: 1.2mm;
+      word-break: break-word;
     }
     .no-print-bar {
       background: #f1f5f9;
@@ -1846,7 +2229,7 @@ function printGoodsReceiptDocument(t) {
       background: #2563eb;
       color: #fff;
       border: none;
-      padding: 8px 22px;
+      padding: 8px 24px;
       font-size: 15px;
       font-weight: bold;
       border-radius: 6px;
@@ -1854,8 +2237,13 @@ function printGoodsReceiptDocument(t) {
     }
     .print-btn:disabled { opacity: .55; cursor: wait; }
     @media screen {
-      body { width: 210mm; margin: 12mm auto; padding: 20mm 20mm 20mm 20mm; box-shadow: 0 12px 36px rgba(15,23,42,.18); }
-      .no-print-bar { margin: -20mm -20mm 10mm -20mm; }
+      body {
+        width: 210mm;
+        margin: 12mm auto;
+        padding: 18mm 18mm 18mm 18mm;
+        box-shadow: 0 12px 36px rgba(15,23,42,.18);
+      }
+      .no-print-bar { margin: -18mm -18mm 12mm -18mm; }
     }
     @media print {
       .no-print-bar { display: none !important; }
@@ -1869,78 +2257,90 @@ function printGoodsReceiptDocument(t) {
     <button class="print-btn" id="print-document-btn" data-ready-label="พิมพ์ / บันทึกเป็น PDF" disabled>กำลังเตรียมฟอนต์ TH Sarabun New...</button>
   </div>
 
-  <div class="doc-header">
-    <h1>${esc(docTitle)}</h1>
-    <p>กลุ่มงานเภสัชกรรมและคุ้มครองผู้บริโภค สำนักงานสาธารณสุขจังหวัดศรีสะเกษ</p>
+  <div class="doc-main-title">${esc(docTitle)}</div>
+
+  <div class="doc-gov-head">
+    <div>ส่วนราชการ สำนักงานสาธารณสุขจังหวัดศรีสะเกษ</div>
+    <div>วันที่ ${toThaiNum(day)} เดือน ${month} พ.ศ. ${toThaiNum(year)}</div>
   </div>
 
-  <table class="meta-table">
-    <tr>
-      <td class="meta-label">เลขที่เอกสาร:</td>
-      <td style="width: 40%;"><strong>${esc(t.refNo)}</strong></td>
-      <td class="meta-label">วันที่:</td>
-      <td><strong>${thaiFullDate(t.date)}</strong></td>
-    </tr>
-    <tr>
-      <td class="meta-label">${isInbound ? 'ผู้ส่งมอบ / แหล่งที่มา:' : 'หน่วยงานผู้เบิก:'}</td>
-      <td colspan="3"><strong>${esc(t.facility)}</strong></td>
-    </tr>
-    ${t.note ? `
-    <tr>
-      <td class="meta-label">หมายเหตุ:</td>
-      <td colspan="3">${esc(t.note)}</td>
-    </tr>` : ''}
-  </table>
+  <div class="donor-info-block">
+    <div class="donor-info-row"><span class="donor-label">ชื่อผู้สนับสนุน/บริจาค</span> ${toThaiNum(esc(meta.donorName || t.facility || ''))}</div>
+    <div class="donor-info-row"><span class="donor-label">ที่อยู่ที่สามารถติดต่อได้</span> ${toThaiNum(esc(meta.donorAddress || '—'))}</div>
+    <div class="donor-info-row"><span class="donor-label">หมายเลขโทรศัพท์</span> ${toThaiNum(esc(meta.donorPhone || '—'))}</div>
+  </div>
 
   <table class="data-table">
     <thead>
       <tr>
-        <th style="width: 40px;">ลำดับ</th>
-        <th>รายการยา / เวชภัณฑ์</th>
-        <th style="width: 110px;">ล็อต (Lot)</th>
-        <th style="width: 105px;">วันหมดอายุ</th>
-        <th style="width: 95px;">จำนวน</th>
-        <th style="width: 75px;">หน่วย</th>
+        <th style="width: 60px;">ลำดับ</th>
+        <th>รายการ</th>
+        <th style="width: 120px;">หน่วยนับ</th>
+        <th style="width: 130px;">จำนวนที่มอบ</th>
       </tr>
     </thead>
     <tbody>
-      ${itemsRows}
+      ${rowsHtml}
     </tbody>
-    <tfoot>
-      <tr>
-        <td colspan="4" style="text-align: center;"><strong>รวมทั้งสิ้น ${fmt.format(t.items.length)} รายการ</strong></td>
-        <td style="text-align: right;"><strong>${fmt.format(totalQty)}</strong></td>
-        <td style="text-align: center;"><strong>หน่วย</strong></td>
-      </tr>
-    </tfoot>
   </table>
 
-  <p class="cert-text">
-    ${isInbound
-      ? 'ได้ทำการตรวจสอบและตรวจรับยา/เวชภัณฑ์ตามรายการข้างต้น ครบถ้วนถูกต้องตามจำนวนและอยู่ในสภาพสมบูรณ์เรียบร้อยแล้ว จึงได้ลงนามไว้เป็นหลักฐาน'
-      : 'ได้ทำการส่งมอบยา/เวชภัณฑ์ตามรายการข้างต้น ครบถ้วนถูกต้องตามจำนวนและอยู่ในสภาพสมบูรณ์เรียบร้อยแล้ว จึงได้ลงนามไว้เป็นหลักฐาน'}
-  </p>
-
-  <div class="sign-grid">
-    <div class="sign-card">
-      <p><strong>${isInbound ? 'ผู้ส่งมอบ' : 'ผู้รับมอบ / ผู้เบิก'}</strong></p>
-      <span class="sign-line"></span>
-      <p>(........................................................)</p>
-      <p>วันที่ ......./......./...........</p>
-    </div>
-    <div class="sign-card">
-      <p><strong>${isInbound ? 'ผู้รับของ (เจ้าหน้าที่คลัง)' : 'ผู้จ่ายของ (เจ้าหน้าที่คลัง)'}</strong></p>
-      <span class="sign-line"></span>
-      <p>(........................................................)</p>
-      <p>วันที่ ......./......./...........</p>
-    </div>
-    <div class="sign-card">
-      <p><strong>ผู้ตรวจรับ (เภสัชกร)</strong></p>
-      <span class="sign-line"></span>
-      <p>(........................................................)</p>
-      <p>วันที่ ......./......./...........</p>
+  <div class="summary-wrap">
+    <div class="summary-text-block">
+      <div>รวมจำนวน........${toThaiNum(t.items.length)}........รายการ</div>
+      <div>ได้รับของถูกต้องและครบถ้วนตามรายการแล้ว</div>
     </div>
   </div>
+
+  <table class="sign-table">
+    <tr>
+      <td>
+        <div class="sign-line-box">
+          <span class="sign-prefix">ลงชื่อ</span>
+          <span class="sign-dots"></span>
+          <span class="sign-role-label">ผู้ตรวจสอบก่อนส่งมอบ</span>
+        </div>
+        <div class="sign-name-wrap">
+          <div class="sign-name-sub">( ${toThaiNum(esc(meta.checkerSendName ? meta.checkerSendName : '...................................................'))} )</div>
+        </div>
+        <div class="sign-pos-sub">ตำแหน่ง ${toThaiNum(esc(meta.checkerSendPos ? meta.checkerSendPos : '...................................................'))}</div>
+      </td>
+      <td>
+        <div class="sign-line-box">
+          <span class="sign-prefix">ลงชื่อ</span>
+          <span class="sign-dots"></span>
+          <span class="sign-role-label">ผู้ตรวจสอบก่อนรับ</span>
+        </div>
+        <div class="sign-name-wrap">
+          <div class="sign-name-sub">( ${toThaiNum(esc(meta.checkerRecvName ? meta.checkerRecvName : '...................................................'))} )</div>
+        </div>
+        <div class="sign-pos-sub">ตำแหน่ง ${toThaiNum(esc(meta.checkerRecvPos ? meta.checkerRecvPos : '...................................................'))}</div>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding-top: 6mm;">
+        <div class="sign-line-box">
+          <span class="sign-prefix">ลงชื่อ</span>
+          <span class="sign-dots"></span>
+          <span class="sign-role-label">ผู้ส่งมอบ</span>
+        </div>
+        <div class="sign-name-wrap">
+          <div class="sign-name-sub">( ${toThaiNum(esc(meta.senderName ? meta.senderName : '...................................................'))} )</div>
+        </div>
+        <div class="sign-pos-sub">ตำแหน่ง ${toThaiNum(esc(meta.senderPos ? meta.senderPos : '...................................................'))}</div>
+      </td>
+      <td style="padding-top: 6mm;">
+        <div class="sign-line-box">
+          <span class="sign-prefix">ลงชื่อ</span>
+          <span class="sign-dots"></span>
+          <span class="sign-role-label">ผู้รับ</span>
+        </div>
+        <div class="sign-name-wrap">
+          <div class="sign-name-sub">( ${toThaiNum(esc(meta.receiverName ? meta.receiverName : '...................................................'))} )</div>
+        </div>
+        <div class="sign-pos-sub">ตำแหน่ง ${toThaiNum(esc(meta.receiverPos ? meta.receiverPos : '...................................................'))}</div>
+      </td>
+    </tr>
+  </table>
 </body>
 </html>`;
 
@@ -2116,9 +2516,9 @@ async function openTransactionDetail(txnId, pageType) {
         printThankYouDocument(t);
       });
 
-      // Print Goods Receipt / Delivery Note Button
+      // Print Goods Receipt / Delivery Note Button (Opens Prompt Modal for Extra Info)
       $('#print-receipt-btn', modal)?.addEventListener('click', () => {
-        printGoodsReceiptDocument(t);
+        openGoodsReceiptPromptModal(t);
       });
 
       // Void Transaction
@@ -2149,6 +2549,126 @@ async function openTransactionDetail(txnId, pageType) {
   }
 }
 
+async function openExpiryAlertEmailModal() {
+  try {
+    const previewData = await api('/api/notifications/expiry-preview?days=180');
+    const items = previewData.items || [];
+    const sender = previewData.sender || 'cream.sk09@gmail.com';
+    const recipient = previewData.recipient || 'lew0994733933@gmail.com';
+    const totalQty = items.reduce((sum, i) => sum + (Number(i.qty) || 0), 0);
+
+    const itemsRows = items.length ? items.map((i, idx) => `
+      <tr>
+        <td style="text-align:center;">${idx + 1}</td>
+        <td><strong>${esc(i.name)}</strong><small style="display:block;color:var(--muted);font-size:11px;">รหัส: ${esc(i.code || '-')} | ${esc(i.category || '-')}</small></td>
+        <td style="text-align:center;"><strong>${esc(i.lot || '-')}</strong></td>
+        <td style="text-align:right;"><strong>${fmt.format(i.qty)}</strong> <small style="color:var(--muted);">${esc(i.unit || '')}</small></td>
+        <td style="text-align:center;">${fdate(i.expiry)}</td>
+        <td style="text-align:center;"><span class="status ${i.daysToExpiry < 0 ? 'expired' : 'expiring'}">${i.daysToExpiry < 0 ? `หมดอายุ (${Math.abs(i.daysToExpiry)} วัน)` : `เหลือ ${i.daysToExpiry} วัน`}</span></td>
+      </tr>
+    `).join('') : `<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted);">ไม่พบรายการยาที่ใกล้หมดอายุภายใน 6 เดือน</td></tr>`;
+
+    const html = `
+      <div class="modal-backdrop" role="presentation">
+        <div class="modal" style="width:min(860px, 96vw);" role="dialog" aria-modal="true" aria-labelledby="expiry-email-title">
+          <div class="modal-head">
+            <div>
+              <h2 id="expiry-email-title">${icon('mail')} ส่งอีเมลแจ้งเตือนยาใกล้หมดอายุ 6 เดือน</h2>
+              <p style="font-size:12px;color:var(--muted);margin-top:2px;">ส่งสรุปข้อมูลรายการยา ล็อต จำนวน และวันหมดอายุ ไปยังผู้รับผิดชอบทางอีเมล</p>
+            </div>
+            <button class="icon-button" type="button" data-close aria-label="ปิด">${icon('close')}</button>
+          </div>
+          <form id="expiry-email-form">
+            <div class="modal-body">
+              <div class="grid" style="grid-template-columns: 1fr 1fr; gap:12px; margin-bottom: 14px;">
+                <label class="field compact" style="margin:0;">
+                  <span>อีเมลผู้ส่ง (Sender) <b class="required">*</b></span>
+                  <input class="control" name="sender" value="${esc(sender)}" required>
+                </label>
+                <label class="field compact" style="margin:0;">
+                  <span>อีเมลผู้รับ (Recipient) <b class="required">*</b></span>
+                  <input class="control" name="recipient" value="${esc(recipient)}" required>
+                </label>
+              </div>
+
+              <div class="grid" style="grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 14px;">
+                <div class="kpi-card orange" style="padding:10px 14px;">
+                  <small style="color:var(--muted);font-size:11.5px;font-weight:600;">เกณฑ์เฝ้าระวัง</small>
+                  <strong style="font-size:15px;margin-top:2px;">ภายใน 6 เดือน (180 วัน)</strong>
+                </div>
+                <div class="kpi-card red" style="padding:10px 14px;">
+                  <small style="color:var(--muted);font-size:11.5px;font-weight:600;">จำนวนรายการยา</small>
+                  <strong style="font-size:15px;margin-top:2px;">${fmt.format(items.length)} รายการ</strong>
+                </div>
+                <div class="kpi-card blue" style="padding:10px 14px;">
+                  <small style="color:var(--muted);font-size:11.5px;font-weight:600;">ยอดรวมเวชภัณฑ์</small>
+                  <strong style="font-size:15px;margin-top:2px;">${fmt.format(totalQty)} ชิ้น/หน่วย</strong>
+                </div>
+              </div>
+
+              <div class="section-title" style="margin: 14px 0 8px 0;">
+                <span>${icon('list')}</span>
+                <h2>รายละเอียดรายการยาที่จะส่งในอีเมล (${items.length} รายการ)</h2>
+              </div>
+              <div class="table-wrap" style="max-height: 280px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px;">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th style="width:45px;text-align:center;">ลำดับ</th>
+                      <th>รายการยา / เวชภัณฑ์</th>
+                      <th style="width:95px;text-align:center;">ล็อต (Lot)</th>
+                      <th style="width:105px;text-align:right;">จำนวน</th>
+                      <th style="width:105px;text-align:center;">วันหมดอายุ</th>
+                      <th style="width:125px;text-align:center;">สถานะ</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${itemsRows}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div class="modal-foot" style="display:flex;justify-content:space-between;align-items:center;">
+              <button class="button secondary small" type="button" data-close>ปิด</button>
+              <button class="button primary" id="btn-submit-send-email" type="submit" ${items.length === 0 ? 'disabled' : ''}>${icon('mail')} ส่งอีเมลแจ้งเตือนทันที</button>
+            </div>
+          </form>
+        </div>
+      </div>`;
+
+    openModal(html, modal => {
+      $('#expiry-email-form', modal)?.addEventListener('submit', async e => {
+        e.preventDefault();
+        const submitBtn = $('#btn-submit-send-email', modal);
+        if (submitBtn) {
+          submitBtn.disabled = true;
+          submitBtn.innerHTML = `${icon('loader')} กำลังส่งอีเมล...`;
+        }
+        const fd = new FormData(e.currentTarget);
+        const sMail = fd.get('sender') || sender;
+        const rMail = fd.get('recipient') || recipient;
+
+        try {
+          const res = await api('/api/notifications/expiry-alert', {
+            method: 'POST',
+            body: JSON.stringify({ sender: sMail, recipient: rMail, thresholdDays: 180 })
+          });
+          closeModal();
+          toast(`ส่งอีเมลแจ้งเตือน ${res.items?.length || items.length} รายการไปยัง ${rMail} เรียบร้อย!`);
+        } catch (ex) {
+          toast(ex.message || 'เกิดข้อผิดพลาดในการส่งอีเมล', 'error');
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = `${icon('mail')} ส่งอีเมลแจ้งเตือนทันที`;
+          }
+        }
+      });
+    });
+  } catch (ex) {
+    toast(ex.message, 'error');
+  }
+}
+
 /* ══════════════════════════════════════════════════════════════
    5. STOCK INVENTORY VIEW WITH PAGINATION & CRUD
    ══════════════════════════════════════════════════════════════ */
@@ -2163,7 +2683,7 @@ async function stockPage(params = new URLSearchParams()) {
   state.categories = data.categories;
 
   $('#main-content').innerHTML = `
-    ${pageHead('boxes', 'purple', 'รายการคงคลัง', 'ค้นหา ติดตามจุดสั่งซื้อ และตรวจวันหมดอายุ (คลิกแถวเพื่อดูรายละเอียด/แก้ไข)', `<a class="button secondary" href="/api/export/inventory.csv">${icon('download')} ส่งออก CSV</a><a class="button primary" href="#inbound">${icon('plus')} รับเข้า</a>`)}
+    ${pageHead('boxes', 'purple', 'รายการคงคลัง', 'ค้นหา ติดตามจุดสั่งซื้อ และตรวจวันหมดอายุ (คลิกแถวเพื่อดูรายละเอียด/แก้ไข)', `<button type="button" class="button smart-primary" id="btn-stock-expiry-email">${icon('mail')} ส่งอีเมลแจ้งเตือน 6 เดือน</button><a class="button secondary" href="/api/export/inventory.csv">${icon('download')} ส่งออก CSV</a><a class="button primary" href="#inbound">${icon('plus')} รับเข้า</a>`)}
     <div class="grid summary-grid">
       ${kpi('package', '', 'พร้อมใช้งาน', fmt.format(data.items.filter(i => i.status === 'normal').length), 'รายการในหน้านี้')}
       ${kpi('alert', 'orange', 'ต่ำกว่าจุดเตือน', fmt.format(data.items.filter(i => i.status === 'low').length), 'รายการในหน้านี้')}
@@ -2206,6 +2726,7 @@ async function stockPage(params = new URLSearchParams()) {
   $('#stock-search').addEventListener('input', debounce(() => reloadStock(1), 350));
   $('#status-filter').addEventListener('change', () => reloadStock(1));
   $('#category-filter').addEventListener('change', () => reloadStock(1));
+  $('#btn-stock-expiry-email')?.addEventListener('click', () => openExpiryAlertEmailModal());
 
   renderStockTable(data.items, data.meta, reloadStock);
 }

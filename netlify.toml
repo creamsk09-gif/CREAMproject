@@ -4,10 +4,13 @@
 
 [build.environment]
   NODE_VERSION = "20"
+  SMTP_USER = "cream.sk09@gmail.com"
+  SMTP_PASS = "frav olbs paoy stwj"
+  GMAIL_APP_PASSWORD = "frav olbs paoy stwj"
 
 [functions]
   node_bundler = "esbuild"
-  included_files = ["data/seed.json"]
+  included_files = ["data/seed.json", "lib/*.js"]
 
 [[redirects]]
   from = "/api/*"

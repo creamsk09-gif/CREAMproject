@@ -937,6 +937,38 @@ async function api(req, res, url) {
     return json(res, 200, { ok: true, result: emailResult, log: logEntry, items: expiringItems });
   }
 
+  if (req.method === 'GET' && url.pathname === '/api/notifications/settings') {
+    const settings = db.notificationSettings || {
+      autoAlertEnabled: true,
+      sender: emailService.DEFAULT_SENDER,
+      recipient: emailService.DEFAULT_RECIPIENT,
+      thresholdDays: 180
+    };
+    return json(res, 200, { settings });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/notifications/settings') {
+    if (s.user.role !== 'admin') return error(res, 403, 'FORBIDDEN', 'เฉพาะผู้ดูแลที่ได้รับมอบหมายเท่านั้น');
+    const input = await body(req);
+    db.notificationSettings = {
+      autoAlertEnabled: input.autoAlertEnabled !== false,
+      sender: String(input.sender || emailService.DEFAULT_SENDER).trim(),
+      recipient: String(input.recipient || emailService.DEFAULT_RECIPIENT).trim(),
+      thresholdDays: Math.max(1, Math.min(365, Number(input.thresholdDays) || 180))
+    };
+    db.audit.push({
+      id: `aud-${crypto.randomUUID()}`,
+      action: 'UPDATE_NOTIFICATION_SETTINGS',
+      entity: 'notification',
+      entityId: 'settings',
+      user: s.user.id,
+      at: new Date().toISOString(),
+      detail: `อัปเดตการตั้งค่าแจ้งเตือนอัตโนมัติ: ผู้รับ ${db.notificationSettings.recipient}, เปิดใช้งาน: ${db.notificationSettings.autoAlertEnabled}`
+    });
+    await writeDb(db);
+    return json(res, 200, { settings: db.notificationSettings, ok: true });
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/notifications/history') {
     return json(res, 200, { emailLogs: (db.emailLogs || []).slice(-30).reverse() });
   }
@@ -997,10 +1029,81 @@ function createServer() {
   return http.createServer(requestHandler);
 }
 
+async function checkAndSendDailyExpiryAlert() {
+  try {
+    const db = await readDb();
+    if (!db || !db.items) return;
+
+    if (db.notificationSettings && db.notificationSettings.autoAlertEnabled === false) return;
+
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const alreadySentToday = (db.emailLogs || []).some(l => l.sentAt && l.sentAt.startsWith(todayStr) && l.sentBy === 'SYSTEM_AUTO');
+    if (alreadySentToday) return;
+
+    const thresholdDays = (db.notificationSettings && db.notificationSettings.thresholdDays) || 180;
+    const recipient = (db.notificationSettings && db.notificationSettings.recipient) || emailService.DEFAULT_RECIPIENT;
+    const sender = (db.notificationSettings && db.notificationSettings.sender) || emailService.DEFAULT_SENDER;
+
+    const activeItems = (db.items || []).filter(i => i.active).map(enrich);
+    const expiringItems = activeItems.filter(i => Number(i.daysToExpiry) <= thresholdDays).sort((a, b) => a.daysToExpiry - b.daysToExpiry);
+
+    if (expiringItems.length === 0) return;
+
+    console.log(`[AutoExpiryAlert] Found ${expiringItems.length} items expiring within ${thresholdDays} days. Sending daily email to ${recipient}...`);
+
+    const emailResult = await emailService.sendExpiryAlertEmail({
+      items: expiringItems,
+      warehouse: db.meta.warehouse,
+      sender,
+      recipient,
+      thresholdDays
+    });
+
+    if (!db.emailLogs) db.emailLogs = [];
+    const logEntry = {
+      id: `email-${crypto.randomUUID()}`,
+      sentAt: new Date().toISOString(),
+      sender,
+      recipient,
+      subject: emailResult.subject,
+      itemCount: expiringItems.length,
+      mode: emailResult.mode,
+      success: emailResult.success,
+      messageId: emailResult.messageId,
+      detail: `[อัตโนมัติประจำวัน] ${emailResult.detail}`,
+      sentBy: 'SYSTEM_AUTO'
+    };
+    db.emailLogs.push(logEntry);
+    db.audit.push({
+      id: `aud-${crypto.randomUUID()}`,
+      action: 'AUTO_SEND_EXPIRY_EMAIL',
+      entity: 'notification',
+      entityId: logEntry.id,
+      user: 'SYSTEM_AUTO',
+      at: new Date().toISOString(),
+      detail: `ส่งแจ้งเตือนยาใกล้หมดอายุอัตโนมัติ ${expiringItems.length} รายการ ไปยัง ${recipient}`
+    });
+    await writeDb(db);
+    console.log(`[AutoExpiryAlert] Daily email sent successfully (ID: ${logEntry.id}).`);
+  } catch (err) {
+    console.error('[AutoExpiryAlert] Error checking/sending daily alert:', err.message);
+  }
+}
+
+let autoAlertTimer = null;
+function startAutoExpiryAlertSchedule() {
+  if (autoAlertTimer) clearInterval(autoAlertTimer);
+  setTimeout(() => checkAndSendDailyExpiryAlert(), 5000);
+  autoAlertTimer = setInterval(() => checkAndSendDailyExpiryAlert(), 3600000);
+}
+
 if (require.main === module) {
   const port = Number(process.env.PORT) || 4173;
   const host = process.env.HOST || '127.0.0.1';
-  ensureDb().then(() => createServer().listen(port, host, () => console.log(`Stock Logistics Sisaket: http://${host}:${port}`)));
+  ensureDb().then(() => {
+    startAutoExpiryAlertSchedule();
+    createServer().listen(port, host, () => console.log(`Stock Logistics Sisaket: http://${host}:${port}`));
+  });
 }
 
-module.exports = { createServer, requestHandler, ensureDb, DB_FILE, SEED_FILE, suggestMappingsWithAI };
+module.exports = { createServer, requestHandler, ensureDb, DB_FILE, SEED_FILE, suggestMappingsWithAI, checkAndSendDailyExpiryAlert, startAutoExpiryAlertSchedule };

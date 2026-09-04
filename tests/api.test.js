@@ -399,7 +399,7 @@ test('POST /api/logout clears session', async () => {
   assert.equal(check.status, 401);
 });
 
-test('GET /api/notifications/expiry-preview and POST /api/notifications/expiry-alert send 6-month alert', async () => {
+test('GET /api/notifications/expiry-preview and POST /api/notifications/expiry-alert support a validated recipient', async () => {
   // Login again to get active session
   const loginRes = await fetch(`${base}/api/login`, {
     method: 'POST',
@@ -414,17 +414,18 @@ test('GET /api/notifications/expiry-preview and POST /api/notifications/expiry-a
   const newCsrf = csrf;
 
   // 1. GET preview
-  const previewRes = await fetch(`${base}/api/notifications/expiry-preview?days=180`, {
+  const recipient = 'alerts@example.test';
+  const previewRes = await fetch(`${base}/api/notifications/expiry-preview?days=180&recipient=${encodeURIComponent(recipient)}`, {
     headers: { cookie: newCookie }
   });
   assert.equal(previewRes.status, 200);
   const previewData = await previewRes.json();
   assert.equal(previewData.sender, 'cream.sk09@gmail.com');
-  assert.equal(previewData.recipient, 'lew0994733933@gmail.com');
+  assert.equal(previewData.recipient, recipient);
   assert.equal(previewData.thresholdDays, 180);
   assert.ok(Array.isArray(previewData.items));
   assert.ok(previewData.previewHtml.includes('cream.sk09@gmail.com'));
-  assert.ok(previewData.previewHtml.includes('lew0994733933@gmail.com'));
+  assert.ok(previewData.previewHtml.includes(recipient));
 
   // 2. POST send alert
   const sendRes = await fetch(`${base}/api/notifications/expiry-alert`, {
@@ -432,7 +433,7 @@ test('GET /api/notifications/expiry-preview and POST /api/notifications/expiry-a
     headers: { cookie: newCookie, 'X-CSRF-Token': newCsrf, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       sender: 'cream.sk09@gmail.com',
-      recipient: 'lew0994733933@gmail.com',
+      recipient,
       thresholdDays: 180
     })
   });
@@ -440,7 +441,7 @@ test('GET /api/notifications/expiry-preview and POST /api/notifications/expiry-a
   const sendData = await sendRes.json();
   assert.equal(sendData.ok, true);
   assert.equal(sendData.result.sender, 'cream.sk09@gmail.com');
-  assert.equal(sendData.result.recipient, 'lew0994733933@gmail.com');
+  assert.equal(sendData.result.recipient, recipient);
   assert.ok(sendData.result.subject.includes('แจ้งเตือนด่วน'));
 
   // 3. GET history
@@ -450,7 +451,15 @@ test('GET /api/notifications/expiry-preview and POST /api/notifications/expiry-a
   assert.equal(historyRes.status, 200);
   const historyData = await historyRes.json();
   assert.ok(Array.isArray(historyData.emailLogs));
-  assert.ok(historyData.emailLogs.some(l => l.recipient === 'lew0994733933@gmail.com'));
+  assert.ok(historyData.emailLogs.some(l => l.recipient === recipient));
+
+  const invalidRecipient = await fetch(`${base}/api/notifications/expiry-alert`, {
+    method: 'POST',
+    headers: { cookie: newCookie, 'X-CSRF-Token': newCsrf, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ recipient: 'alerts@example.test\r\nBcc: attacker@example.test', sender: 'cream.sk09@gmail.com' })
+  });
+  assert.equal(invalidRecipient.status, 400);
+  assert.equal((await invalidRecipient.json()).error.code, 'INVALID_EMAIL');
 });
 
 /* ── Procurement Plan & YoY Analytics Tests ── */

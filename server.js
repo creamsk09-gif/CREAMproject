@@ -57,6 +57,7 @@ const loginAttempts = new Map();
 const aiAttempts = new Map();
 const RATE_LIMIT_MAX = 5;
 const RATE_LIMIT_WINDOW = 15 * 60 * 1000;
+const SINGLE_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 function checkRateLimit(ip) {
   const now = Date.now();
   const record = loginAttempts.get(ip);
@@ -78,6 +79,14 @@ function checkAiRateLimit(ip) {
   }
   record.count++;
   return record.count <= 12;
+}
+
+function normalizeEmailAddress(value) {
+  const email = String(value || '').trim().toLowerCase();
+  if (email.length > 254 || /[\r\n]/.test(email) || !SINGLE_EMAIL.test(email)) {
+    throw Object.assign(new Error('invalid email address'), { status: 400, code: 'INVALID_EMAIL' });
+  }
+  return email;
 }
 
 /* ── Pagination Helper ── */
@@ -996,8 +1005,8 @@ async function api(req, res, url) {
 
   if (req.method === 'GET' && url.pathname === '/api/notifications/expiry-preview') {
     const thresholdDays = Math.max(1, Math.min(365, Number(url.searchParams.get('days')) || 180));
-    const recipient = String(url.searchParams.get('recipient') || emailService.DEFAULT_RECIPIENT).trim();
-    const sender = String(url.searchParams.get('sender') || emailService.DEFAULT_SENDER).trim();
+    const recipient = normalizeEmailAddress(url.searchParams.get('recipient') || emailService.DEFAULT_RECIPIENT);
+    const sender = normalizeEmailAddress(url.searchParams.get('sender') || emailService.DEFAULT_SENDER);
     const activeItems = (db.items || []).filter(i => i.active).map(enrich);
     const expiringItems = activeItems.filter(i => Number(i.daysToExpiry) <= thresholdDays).sort((a, b) => a.daysToExpiry - b.daysToExpiry);
     const previewHtml = emailService.generateExpiryAlertEmailHtml({ items: expiringItems, warehouse: db.meta.warehouse, thresholdDays, sender, recipient });
@@ -1016,8 +1025,8 @@ async function api(req, res, url) {
   if (req.method === 'POST' && url.pathname === '/api/notifications/expiry-alert') {
     const input = await body(req);
     const thresholdDays = Math.max(1, Math.min(365, Number(input.thresholdDays) || 180));
-    const recipient = String(input.recipient || emailService.DEFAULT_RECIPIENT).trim();
-    const sender = String(input.sender || emailService.DEFAULT_SENDER).trim();
+    const recipient = normalizeEmailAddress(input.recipient || emailService.DEFAULT_RECIPIENT);
+    const sender = normalizeEmailAddress(input.sender || emailService.DEFAULT_SENDER);
     const activeItems = (db.items || []).filter(i => i.active).map(enrich);
     const expiringItems = activeItems.filter(i => Number(i.daysToExpiry) <= thresholdDays).sort((a, b) => a.daysToExpiry - b.daysToExpiry);
 
@@ -1055,12 +1064,12 @@ async function api(req, res, url) {
     });
     await writeDb(db);
 
-    return json(res, 200, { ok: true, result: emailResult, log: logEntry, items: expiringItems });
+    return json(res, emailResult.success ? 200 : 502, { ok: emailResult.success, result: emailResult, log: logEntry, items: expiringItems });
   }
 
   if (req.method === 'GET' && url.pathname === '/api/notifications/settings') {
     const settings = db.notificationSettings || {
-      autoAlertEnabled: true,
+      autoAlertEnabled: false,
       sender: emailService.DEFAULT_SENDER,
       recipient: emailService.DEFAULT_RECIPIENT,
       thresholdDays: 180
@@ -1073,8 +1082,8 @@ async function api(req, res, url) {
     const input = await body(req);
     db.notificationSettings = {
       autoAlertEnabled: input.autoAlertEnabled !== false,
-      sender: String(input.sender || emailService.DEFAULT_SENDER).trim(),
-      recipient: String(input.recipient || emailService.DEFAULT_RECIPIENT).trim(),
+      sender: normalizeEmailAddress(input.sender || emailService.DEFAULT_SENDER),
+      recipient: normalizeEmailAddress(input.recipient || emailService.DEFAULT_RECIPIENT),
       thresholdDays: Math.max(1, Math.min(365, Number(input.thresholdDays) || 180))
     };
     db.audit.push({
@@ -1359,7 +1368,8 @@ async function requestHandler(req, res) {
         INVALID_JSON: 'รูปแบบข้อมูลไม่ถูกต้อง',
         WRITE_CONFLICT: 'ข้อมูลมีการเปลี่ยนแปลงพร้อมกัน กรุณาโหลดใหม่แล้วลองอีกครั้ง',
         STORAGE_UNAVAILABLE: 'ระบบจัดเก็บข้อมูลไม่พร้อมใช้งาน กรุณาลองใหม่',
-        CONFIG_INVALID: 'การตั้งค่า production ยังไม่ครบถ้วน'
+        CONFIG_INVALID: 'การตั้งค่า production ยังไม่ครบถ้วน',
+        INVALID_EMAIL: 'รูปแบบอีเมลไม่ถูกต้อง'
       };
       if (!res.headersSent) error(res, status, code, messages[code] || 'ระบบขัดข้อง กรุณาลองใหม่');
       else res.end();
@@ -1373,13 +1383,13 @@ function createServer() {
 async function checkAndSendDailyExpiryAlert() {
   try {
     const db = await readDb();
-    if (!db || !db.items) return;
+    if (!db || !db.items) return { ok: true, skipped: 'NO_DATA' };
 
-    if (db.notificationSettings && db.notificationSettings.autoAlertEnabled === false) return;
+    if (!db.notificationSettings || db.notificationSettings.autoAlertEnabled !== true) return { ok: true, skipped: 'DISABLED' };
 
     const todayStr = new Date().toISOString().slice(0, 10);
-    const alreadySentToday = (db.emailLogs || []).some(l => l.sentAt && l.sentAt.startsWith(todayStr) && l.sentBy === 'SYSTEM_AUTO');
-    if (alreadySentToday) return;
+    const alreadySentToday = (db.emailLogs || []).some(l => l.sentAt && l.sentAt.startsWith(todayStr) && l.sentBy === 'SYSTEM_AUTO' && l.success);
+    if (alreadySentToday) return { ok: true, skipped: 'ALREADY_SENT' };
 
     const thresholdDays = (db.notificationSettings && db.notificationSettings.thresholdDays) || 180;
     const recipient = (db.notificationSettings && db.notificationSettings.recipient) || emailService.DEFAULT_RECIPIENT;
@@ -1388,7 +1398,7 @@ async function checkAndSendDailyExpiryAlert() {
     const activeItems = (db.items || []).filter(i => i.active).map(enrich);
     const expiringItems = activeItems.filter(i => Number(i.daysToExpiry) <= thresholdDays).sort((a, b) => a.daysToExpiry - b.daysToExpiry);
 
-    if (expiringItems.length === 0) return;
+    if (expiringItems.length === 0) return { ok: true, skipped: 'NO_EXPIRING_ITEMS' };
 
     console.log(`[AutoExpiryAlert] Found ${expiringItems.length} items expiring within ${thresholdDays} days. Sending daily email to ${recipient}...`);
 
@@ -1425,9 +1435,15 @@ async function checkAndSendDailyExpiryAlert() {
       detail: `ส่งแจ้งเตือนยาใกล้หมดอายุอัตโนมัติ ${expiringItems.length} รายการ ไปยัง ${recipient}`
     });
     await writeDb(db);
-    console.log(`[AutoExpiryAlert] Daily email sent successfully (ID: ${logEntry.id}).`);
+    if (emailResult.success) {
+      console.log(`[AutoExpiryAlert] Daily email sent successfully (ID: ${logEntry.id}).`);
+      return { ok: true, mode: emailResult.mode, messageId: emailResult.messageId };
+    }
+    console.error(`[AutoExpiryAlert] Daily email failed (ID: ${logEntry.id}): ${emailResult.error || emailResult.detail}`);
+    return { ok: false, mode: emailResult.mode, error: emailResult.error || 'EMAIL_DELIVERY_FAILED' };
   } catch (err) {
     console.error('[AutoExpiryAlert] Error checking/sending daily alert:', err.message);
+    return { ok: false, error: err.code || 'EMAIL_DELIVERY_FAILED' };
   }
 }
 

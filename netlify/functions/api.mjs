@@ -1,5 +1,8 @@
-const serverless = require('serverless-http');
-const { requestHandler } = require('../../server');
+import serverless from 'serverless-http';
+import { withLambda } from '@netlify/aws-lambda-compat';
+import server from '../../server.js';
+
+const { requestHandler } = server;
 
 function netlifyRequestHandler(req, res) {
   const functionPrefix = '/.netlify/functions/api';
@@ -10,10 +13,4 @@ function netlifyRequestHandler(req, res) {
 
 const serverlessHandler = serverless(netlifyRequestHandler);
 
-exports.handler = async (event, context) => {
-  if (event.blobs) {
-    const { connectLambda } = await import('@netlify/blobs');
-    connectLambda(event);
-  }
-  return serverlessHandler(event, context);
-};
+export default withLambda((event, context) => serverlessHandler(event, context));
